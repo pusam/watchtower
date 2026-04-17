@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watchtower</title>
+    <link rel="stylesheet" th:href="@{/css/dashboard.css(v=${#dates.createNow().time})}">
+</head>
+<body>
+
+<header class="app-header">
+    <div class="brand">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="4"/>
+            <line x1="12" y1="2" x2="12" y2="6"/>
+            <line x1="12" y1="18" x2="12" y2="22"/>
+            <line x1="2" y1="12" x2="6" y2="12"/>
+            <line x1="18" y1="12" x2="22" y2="12"/>
+        </svg>
+        <div class="brand-text">
+            <h1>Watchtower</h1>
+            <span class="brand-sub">Server Monitoring</span>
+        </div>
+    </div>
+
+    <div class="header-summary">
+        <div class="chip">
+            <span class="chip-label">HOSTS</span>
+            <span class="chip-value" id="total-count">0</span>
+        </div>
+        <div class="chip chip-up">
+            <span class="chip-dot"></span>
+            <span class="chip-label">UP</span>
+            <span class="chip-value" id="up-count">0</span>
+        </div>
+        <div class="chip chip-down">
+            <span class="chip-dot"></span>
+            <span class="chip-label">DOWN</span>
+            <span class="chip-value" id="down-count">0</span>
+        </div>
+        <div class="chip">
+            <span class="chip-label">PROCS</span>
+            <span class="chip-value" id="procs-count">0</span>
+        </div>
+        <div class="chip">
+            <span class="chip-label">RPS</span>
+            <span class="chip-value" id="rps-count">0</span>
+        </div>
+    </div>
+
+    <div class="header-right">
+        <div class="clock" id="clock">--:--:--</div>
+        <div class="conn">
+            <span class="conn-dot" id="pulse-dot"></span>
+            <span id="connection-status">연결 중…</span>
+        </div>
+    </div>
+</header>
+
+<div class="alert-bar" id="alert-bar" style="display:none">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    <span id="alert-text"></span>
+</div>
+
+<div class="alarm-strip" id="alarm-strip" style="display:none"></div>
+
+<main class="workspace">
+
+    <aside class="sidebar">
+        <div class="section-head">
+            <span class="section-title">호스트</span>
+            <span class="section-count" id="tree-count">0</span>
+        </div>
+        <nav class="host-list" id="host-list">
+            <button class="host-item selected" data-scope="all">
+                <span class="host-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                </span>
+                <div class="host-body">
+                    <span class="host-name">전체 호스트</span>
+                    <span class="host-meta">모든 서버 집계</span>
+                </div>
+                <span class="host-badge" id="all-badge">0</span>
+            </button>
+            <div id="host-items"></div>
+        </nav>
+    </aside>
+
+    <section class="content" id="content">
+
+        <div class="scope-banner">
+            <div class="scope-banner-left">
+                <h2 class="scope-title" id="scope-title">전체 호스트</h2>
+                <div class="scope-subtitle" id="scope-subtitle">집계된 서버 메트릭</div>
+            </div>
+            <div class="scope-banner-right" id="scope-banner-right"></div>
+        </div>
+
+        <div class="kpi-grid" id="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-head">
+                    <span class="kpi-label">CPU</span>
+                    <span class="kpi-badge" id="kpi-cpu-badge">평균</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value" id="kpi-cpu-value">--</span>
+                    <span class="kpi-unit">%</span>
+                </div>
+                <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-cpu-bar" style="width:0"></div></div>
+                <div class="kpi-sub" id="kpi-cpu-sub">코어 --</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-head">
+                    <span class="kpi-label">메모리</span>
+                    <span class="kpi-badge" id="kpi-mem-badge">평균</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value" id="kpi-mem-value">--</span>
+                    <span class="kpi-unit">%</span>
+                </div>
+                <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-mem-bar" style="width:0"></div></div>
+                <div class="kpi-sub" id="kpi-mem-sub">사용 --</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-head">
+                    <span class="kpi-label">디스크</span>
+                    <span class="kpi-badge" id="kpi-disk-badge">최대</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value" id="kpi-disk-value">--</span>
+                    <span class="kpi-unit">%</span>
+                </div>
+                <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-disk-bar" style="width:0"></div></div>
+                <div class="kpi-sub" id="kpi-disk-sub">마운트 --</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-head">
+                    <span class="kpi-label">로드 평균 (1m)</span>
+                    <span class="kpi-badge" id="kpi-load-badge">load</span>
+                </div>
+                <div class="kpi-value-row">
+                    <span class="kpi-value" id="kpi-load-value">--</span>
+                    <span class="kpi-unit"></span>
+                </div>
+                <div class="kpi-sub" id="kpi-load-sub">5m -- · 15m --</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="card chart-card">
+                <div class="card-head">
+                    <span class="card-title">CPU 사용률</span>
+                    <div class="card-head-right">
+                        <span class="card-sub">% · 최근 5분</span>
+                        <button class="expand-btn" data-chart="cpu" data-title="CPU 사용률" title="확대">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
+            </div>
+            <div class="card chart-card">
+                <div class="card-head">
+                    <span class="card-title">메모리 사용률</span>
+                    <div class="card-head-right">
+                        <span class="card-sub">% · 최근 5분</span>
+                        <button class="expand-btn" data-chart="mem" data-title="메모리 사용률" title="확대">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
+            </div>
+            <div class="card chart-card">
+                <div class="card-head">
+                    <span class="card-title">로드 평균</span>
+                    <div class="card-head-right">
+                        <span class="card-sub">1분 · 최근 5분</span>
+                        <button class="expand-btn" data-chart="load" data-title="로드 평균 (1분)" title="확대">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrap"><canvas id="chart-load"></canvas></div>
+            </div>
+            <div class="card chart-card">
+                <div class="card-head">
+                    <span class="card-title">디스크 최대 사용률</span>
+                    <div class="card-head-right">
+                        <span class="card-sub">% · 최근 5분</span>
+                        <button class="expand-btn" data-chart="disk" data-title="디스크 최대 사용률" title="확대">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrap"><canvas id="chart-disk"></canvas></div>
+            </div>
+            <div class="card chart-card">
+                <div class="card-head">
+                    <span class="card-title">네트워크 I/O</span>
+                    <div class="card-head-right">
+                        <span class="card-sub">RX/TX · 최근 5분</span>
+                        <button class="expand-btn" data-chart="net" data-title="네트워크 I/O" title="확대">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrap"><canvas id="chart-net"></canvas></div>
+            </div>
+            <div class="card chart-card">
+                <div class="card-head">
+                    <span class="card-title">HTTP 상태 분포</span>
+                    <div class="card-head-right">
+                        <span class="card-sub">2xx/3xx/4xx/5xx · 최근 5분</span>
+                        <button class="expand-btn" data-chart="status" data-title="HTTP 상태 분포" title="확대">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrap"><canvas id="chart-status"></canvas></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span class="card-title">애플리케이션 프로세스</span>
+                <span class="card-sub" id="procs-sub">-</span>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table" id="procs-table">
+                    <thead>
+                    <tr>
+                        <th>호스트</th>
+                        <th>프로세스</th>
+                        <th class="num">PID</th>
+                        <th class="num">메모리</th>
+                        <th class="num">가동 시간</th>
+                        <th>커맨드</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div class="empty-state" id="procs-empty" style="display:none">실행 중인 등록 프로세스 없음</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span class="card-title">디스크 사용량</span>
+                <span class="card-sub" id="disks-sub">-</span>
+            </div>
+            <div class="disks-list" id="disks-list"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span class="card-title">SSL 인증서</span>
+                <span class="card-sub" id="certs-sub">-</span>
+            </div>
+            <div class="certs-list" id="certs-list"></div>
+            <div class="empty-state" id="certs-empty" style="display:none">
+                감지된 인증서 없음<br>
+                <span class="hint">에이전트의 <code>CERT_PATHS</code> 변수로 경로 지정 (기본 <code>auto</code>: Let's Encrypt 자동 탐지)</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span class="card-title">엔드포인트 집계</span>
+                <span class="card-sub" id="endpoints-sub">- · 최근 5분</span>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table" id="endpoints-table">
+                    <thead>
+                    <tr>
+                        <th>메서드</th>
+                        <th>경로 패턴</th>
+                        <th class="num">건수</th>
+                        <th class="num">평균</th>
+                        <th class="num">p95</th>
+                        <th class="num">p99</th>
+                        <th class="num">최대</th>
+                        <th class="num">에러율</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div class="empty-state" id="endpoints-empty" style="display:none">수집된 요청 없음</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span class="card-title">네트워크 & 포트</span>
+                <span class="card-sub" id="netports-sub">-</span>
+            </div>
+            <div class="netports-split">
+                <div class="netports-side">
+                    <div class="netports-head">활성 TCP 연결 / 처리량</div>
+                    <div class="netports-kpi" id="netports-kpi"></div>
+                </div>
+                <div class="netports-side netports-ports">
+                    <div class="netports-head">LISTEN 포트</div>
+                    <div class="ports-list" id="ports-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span class="card-title">느린 쿼리 (MariaDB)</span>
+                <span class="card-sub" id="slowq-sub">- · 최근 15분</span>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table" id="slowq-table">
+                    <thead>
+                    <tr>
+                        <th>SQL 패턴</th>
+                        <th class="num">건수</th>
+                        <th class="num">평균</th>
+                        <th class="num">p95</th>
+                        <th class="num">최대</th>
+                        <th class="num">rows 검사</th>
+                        <th>DB</th>
+                        <th class="num">최근</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div class="empty-state" id="slowq-empty">슬로우 쿼리 없음 (또는 에이전트 SLOW_QUERY_LOG 미설정)</div>
+            </div>
+        </div>
+
+        <div class="card card-xlog">
+            <div class="card-head">
+                <span class="card-title">최근 API 요청</span>
+                <div class="card-head-right">
+                    <span class="card-sub" id="xlog-sub">0 requests</span>
+                    <span class="card-sub mono" id="xlog-latency">avg -- ms</span>
+                    <button class="expand-btn" data-chart="scatter" data-title="응답 시간 분포" title="확대">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="xlog-scatter-wrap">
+                <canvas id="xlog-scatter"></canvas>
+            </div>
+            <div class="table-wrap xlog-table-wrap">
+                <table class="data-table xlog-table" id="xlog-table">
+                    <thead>
+                    <tr>
+                        <th style="width:90px">시각</th>
+                        <th style="width:80px">메서드</th>
+                        <th>경로</th>
+                        <th class="num" style="width:70px">상태</th>
+                        <th class="num" style="width:110px">응답</th>
+                        <th style="width:130px">IP</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div class="empty-state" id="xlog-empty">
+                    액세스 로그 수집이 아직 들어오지 않음<br>
+                    <span class="hint">에이전트의 <code>ACCESS_LOGS</code> 변수에 nginx 액세스 로그 경로 설정 필요</span>
+                </div>
+            </div>
+        </div>
+
+    </section>
+
+</main>
+
+<div class="chart-modal" id="chart-modal" style="display:none">
+    <div class="chart-modal-backdrop" id="chart-modal-backdrop"></div>
+    <div class="chart-modal-box">
+        <div class="chart-modal-head">
+            <span class="chart-modal-title" id="chart-modal-title">차트</span>
+            <button class="chart-modal-close" id="chart-modal-close" title="닫기">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="chart-modal-body">
+            <canvas id="chart-modal-canvas"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="detail-modal" id="detail-modal" style="display:none">
+    <div class="detail-modal-backdrop" id="detail-modal-backdrop"></div>
+    <div class="detail-modal-box">
+        <div class="detail-modal-head">
+            <span class="detail-modal-title" id="detail-modal-title">API 요청 상세</span>
+            <button class="chart-modal-close" id="detail-modal-close" title="닫기">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="detail-modal-body" id="detail-modal-body"></div>
+    </div>
+</div>
+
+<footer>
+    <span>Watchtower</span>
+    <span class="footer-sep">·</span>
+    <span id="footer-uptime">-</span>
+    <span class="footer-sep">·</span>
+    <span id="footer-scope">전체 호스트</span>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script th:src="@{/js/dashboard.js(v=${#dates.createNow().time})}"></script>
+</body>
+</html>

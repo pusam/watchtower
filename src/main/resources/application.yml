@@ -1,0 +1,56 @@
+server:
+  port: 9090
+
+spring:
+  application:
+    name: watchtower
+  thymeleaf:
+    cache: false
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-cache: true
+          no-store: true
+          must-revalidate: true
+
+watchtower:
+  poll-interval-ms: 5000
+  history-size: 60
+  request-timeout-ms: 3000
+  push-stale-threshold-ms: 15000
+  alarms:
+    enabled: true
+    check-interval-ms: 10000
+    cooldown-seconds: 300
+    slack-webhook-url: ${WATCHTOWER_SLACK_WEBHOOK:}
+    cpu-threshold-pct: 90
+    mem-threshold-pct: 90
+    disk-threshold-pct: 85
+    error-rate-threshold-pct: 5
+    error-rate-window-sec: 60
+    slow-response-ms: 3000
+    cert-days-left-threshold: 14
+    host-down-threshold-ms: 30000
+  security:
+    dashboard-username: ${WATCHTOWER_DASHBOARD_USER:admin}
+    dashboard-password: ${WATCHTOWER_DASHBOARD_PASS:changeme}
+    agent-api-key: ${WATCHTOWER_AGENT_API_KEY:changeme-agent-key}
+    allowed-origins:
+      - ${WATCHTOWER_ALLOWED_ORIGIN:http://localhost:9090}
+      - https://*.ngrok-free.dev
+      - https://*.ngrok-free.app
+      - https://*.ngrok.io
+    max-registrations-per-minute: 12
+  hosts:
+    - id: server-a
+      name: Fulfillment Server A
+      agentUrl: http://192.168.0.10:19090
+    - id: server-b
+      name: Fulfillment Server B
+      agentUrl: http://192.168.0.11:19090
+
+logging:
+  level:
+    root: INFO
+    com.watchtower: DEBUG
