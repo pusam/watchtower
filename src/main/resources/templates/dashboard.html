@@ -50,6 +50,10 @@
     </div>
 
     <div class="header-right">
+        <button class="maint-btn" id="maint-btn" title="알림 일시 중단">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            <span id="maint-label">알림 뮤트</span>
+        </button>
         <div class="clock" id="clock">--:--:--</div>
         <div class="conn">
             <span class="conn-dot" id="pulse-dot"></span>
@@ -255,6 +259,36 @@
                 <span class="card-sub" id="disks-sub">-</span>
             </div>
             <div class="disks-list" id="disks-list"></div>
+        </div>
+
+        <div class="card" id="history-card">
+            <div class="card-head">
+                <span class="card-title">히스토리</span>
+                <div class="card-head-right">
+                    <div class="range-buttons" id="history-range">
+                        <button class="range-btn" data-range="1h">1h</button>
+                        <button class="range-btn active" data-range="6h">6h</button>
+                        <button class="range-btn" data-range="24h">24h</button>
+                        <button class="range-btn" data-range="7d">7d</button>
+                    </div>
+                    <span class="card-sub" id="history-sub">- </span>
+                </div>
+            </div>
+            <div class="history-grid">
+                <div class="history-chart-wrap"><canvas id="history-cpu"></canvas></div>
+                <div class="history-chart-wrap"><canvas id="history-mem"></canvas></div>
+                <div class="history-chart-wrap"><canvas id="history-load"></canvas></div>
+                <div class="history-chart-wrap"><canvas id="history-net"></canvas></div>
+            </div>
+            <div class="empty-state" id="history-empty" style="display:none">히스토리를 보려면 좌측에서 호스트를 선택하세요.</div>
+        </div>
+
+        <div class="card" id="probes-card" style="display:none">
+            <div class="card-head">
+                <span class="card-title">엔드포인트 프로브</span>
+                <span class="card-sub" id="probes-sub">-</span>
+            </div>
+            <div class="probes-list" id="probes-list"></div>
         </div>
 
         <div class="card">

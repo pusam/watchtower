@@ -43,6 +43,13 @@ secrets/
 # Agent runtime state (do not commit)
 /var/lib/watchtower-agent/
 
+# SQLite persistence (local runtime data)
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
 # Misc
 *.swp
 *.swo

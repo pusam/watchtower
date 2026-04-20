@@ -2,14 +2,20 @@ package com.watchtower.store;
 
 import com.watchtower.config.MonitorProperties;
 import com.watchtower.domain.HostSnapshot;
+import com.watchtower.persistence.SnapshotRepository;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 public class MetricsStore {
 
@@ -17,16 +23,47 @@ public class MetricsStore {
     private static final int SLOW_QUERY_BUFFER_SIZE = 500;
 
     private final int historySize;
+    private final MonitorProperties properties;
+    private final ObjectProvider<SnapshotRepository> repoProvider;
     private final Map<String, Deque<HostSnapshot>> store = new ConcurrentHashMap<>();
     private final Map<String, HostSnapshot> latest = new ConcurrentHashMap<>();
     private final Map<String, Deque<HostSnapshot.RequestLog>> xlog = new ConcurrentHashMap<>();
     private final Map<String, Deque<HostSnapshot.SlowQuery>> slowLog = new ConcurrentHashMap<>();
 
-    public MetricsStore(MonitorProperties properties) {
+    public MetricsStore(MonitorProperties properties, ObjectProvider<SnapshotRepository> repoProvider) {
         this.historySize = properties.getHistorySize();
+        this.properties = properties;
+        this.repoProvider = repoProvider;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void restore() {
+        if (!properties.getPersistence().isEnabled()) return;
+        SnapshotRepository repo = repoProvider.getIfAvailable();
+        if (repo == null) return;
+        try {
+            int limit = Math.min(historySize, properties.getPersistence().getRestoreSnapshotsPerHost());
+            List<HostSnapshot> loaded = repo.loadRecentPerHost(limit);
+            for (HostSnapshot snap : loaded) {
+                putInMemory(snap);
+            }
+            if (!loaded.isEmpty()) {
+                log.info("restored {} snapshots across {} hosts", loaded.size(), latest.size());
+            }
+        } catch (Exception e) {
+            log.warn("snapshot restore failed: {}", e.getMessage());
+        }
     }
 
     public void put(HostSnapshot snapshot) {
+        putInMemory(snapshot);
+        if (properties.getPersistence().isEnabled()) {
+            SnapshotRepository repo = repoProvider.getIfAvailable();
+            if (repo != null) repo.save(snapshot);
+        }
+    }
+
+    private void putInMemory(HostSnapshot snapshot) {
         latest.put(snapshot.hostId(), snapshot);
         Deque<HostSnapshot> queue = store.computeIfAbsent(snapshot.hostId(), k -> new ArrayDeque<>());
         synchronized (queue) {

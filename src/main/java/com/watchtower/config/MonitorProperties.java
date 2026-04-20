@@ -1,7 +1,9 @@
 package com.watchtower.config;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
@@ -15,8 +17,11 @@ public class MonitorProperties {
     private long requestTimeoutMs = 3000;
     private long pushStaleThresholdMs = 15000;
     private List<HostTarget> hosts = new ArrayList<>();
+    private List<Probe> probes = new ArrayList<>();
+    private List<MaintenanceWindow> maintenance = new ArrayList<>();
     private Security security = new Security();
     private Alarms alarms = new Alarms();
+    private Persistence persistence = new Persistence();
 
     @Data
     public static class HostTarget {
@@ -32,6 +37,44 @@ public class MonitorProperties {
         private String agentApiKey = "";
         private List<String> allowedOrigins = List.of("http://localhost:9090");
         private int maxRegistrationsPerMinute = 12;
+        private List<DashboardUser> users = new ArrayList<>();
+    }
+
+    @Data
+    public static class DashboardUser {
+        private String username;
+        private String password;
+        private String role = "VIEWER";
+    }
+
+    @Data
+    public static class MaintenanceWindow {
+        private String name;
+        private String from;
+        private String to;
+        private List<String> hostIds = new ArrayList<>();
+    }
+
+    @Data
+    public static class Probe {
+        private String id;
+        private String name;
+        private String type = "http";
+        private String target;
+        private int expectedStatus = 200;
+        private long timeoutMs = 3000;
+        private long intervalMs = 30000;
+        private long slowThresholdMs = 1500;
+    }
+
+    @Data
+    public static class Persistence {
+        private boolean enabled = true;
+        private String dbPath = "./data/watchtower.db";
+        private int snapshotRetentionDays = 7;
+        private int alarmRetentionDays = 30;
+        private long writeIntervalMs = 0;
+        private int restoreSnapshotsPerHost = 60;
     }
 
     @Data
@@ -39,7 +82,11 @@ public class MonitorProperties {
         private boolean enabled = true;
         private long checkIntervalMs = 10000;
         private long cooldownSeconds = 300;
+        private long breachDurationSec = 60;
+        private Map<String, Long> durationOverridesSec = new HashMap<>();
         private String slackWebhookUrl = "";
+        private String discordWebhookUrl = "";
+        private String genericWebhookUrl = "";
         private double cpuThresholdPct = 90;
         private double memThresholdPct = 90;
         private double diskThresholdPct = 85;

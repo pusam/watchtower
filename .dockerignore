@@ -1,0 +1,13 @@
+.git
+.gitignore
+.idea
+.gradle
+build
+data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+README.md
+.env
+.env.*

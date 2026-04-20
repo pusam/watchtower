@@ -13,16 +13,26 @@ spring:
           no-cache: true
           no-store: true
           must-revalidate: true
+  sql:
+    init:
+      mode: never
 
 watchtower:
   poll-interval-ms: 5000
   history-size: 60
   request-timeout-ms: 3000
   push-stale-threshold-ms: 15000
+  persistence:
+    enabled: true
+    db-path: ${WATCHTOWER_DB_PATH:./data/watchtower.db}
+    snapshot-retention-days: 7
+    alarm-retention-days: 30
+    restore-snapshots-per-host: 60
   alarms:
     enabled: true
     check-interval-ms: 10000
     cooldown-seconds: 300
+    breach-duration-sec: 60
     slack-webhook-url: ${WATCHTOWER_SLACK_WEBHOOK:}
     cpu-threshold-pct: 90
     mem-threshold-pct: 90
@@ -49,6 +59,33 @@ watchtower:
     - id: server-b
       name: Fulfillment Server B
       agentUrl: http://192.168.0.11:19090
+  probes: []
+    # - id: api-health
+    #   name: API Health
+    #   type: http
+    #   target: https://example.com/health
+    #   expectedStatus: 200
+    #   timeoutMs: 3000
+    #   intervalMs: 30000
+    #   slowThresholdMs: 1500
+    # - id: db-port
+    #   name: MariaDB TCP
+    #   type: tcp
+    #   target: 192.168.0.10:3306
+    #   timeoutMs: 2000
+    #   intervalMs: 30000
+    #   slowThresholdMs: 500
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
 
 logging:
   level:

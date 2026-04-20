@@ -11,11 +11,16 @@ const state = {
     endpoints: [],
     statusBuckets: [],
     slowQueries: [],
+    probes: [],
+    historyRange: '6h',
+    historyData: [],
     scope: 'all',
     charts: {},
     hostColorIndex: {},
     pageStart: Date.now()
 };
+
+const RANGE_MS = { '1h': 3600e3, '6h': 6*3600e3, '24h': 24*3600e3, '7d': 7*24*3600e3 };
 
 // ===== Helpers =====
 function colorForHost(hostId) {
@@ -78,6 +83,43 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
+// ===== Maintenance mute =====
+const maintBtn = document.getElementById('maint-btn');
+const maintLabel = document.getElementById('maint-label');
+let maintActive = false;
+if (maintBtn) {
+    maintBtn.addEventListener('click', async () => {
+        if (!maintActive) {
+            const minutes = parseInt(prompt('모든 알림을 몇 분 동안 뮤트할까요? (기본 60)', '60') || '60', 10);
+            if (!minutes || minutes <= 0) return;
+            try {
+                const r = await fetch('/api/maintenance/mute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ durationSec: minutes * 60 })
+                });
+                if (!r.ok) throw new Error('mute failed');
+                maintActive = true;
+                maintBtn.classList.add('active');
+                maintLabel.textContent = `뮤트 중 (${minutes}분)`;
+            } catch (e) {
+                console.warn('mute failed', e);
+                alert('뮤트 실패');
+            }
+        } else {
+            try {
+                const r = await fetch('/api/maintenance/unmute', { method: 'POST' });
+                if (!r.ok) throw new Error('unmute failed');
+                maintActive = false;
+                maintBtn.classList.remove('active');
+                maintLabel.textContent = '알림 뮤트';
+            } catch (e) {
+                console.warn('unmute failed', e);
+            }
+        }
+    });
+}
+
 // ===== Sidebar (host list) =====
 function renderHostList() {
     const container = document.getElementById('host-items');
@@ -117,6 +159,7 @@ document.querySelector('.host-item[data-scope="all"]').addEventListener('click',
 function setScope(scope) {
     state.scope = scope;
     document.querySelectorAll('.host-item').forEach(el => el.classList.toggle('selected', el.dataset.scope === scope));
+    fetchHistoryForScope();
     renderAll();
     fetchEndpoints();
     fetchStatusDistribution();
@@ -779,15 +822,36 @@ function renderAlarms() {
     strip.style.display = 'flex';
     strip.innerHTML = active.slice(0, 5).map(a => {
         const sev = (a.severity || 'WARN').toLowerCase();
+        const ackCls = a.acknowledged ? 'acked' : '';
+        const ackBtn = a.acknowledged
+            ? `<span class="alarm-acked" title="확인: ${escapeHtml(a.acknowledgedBy || '')}">✓ ${escapeHtml(a.acknowledgedBy || '')}</span>`
+            : `<button class="alarm-ack-btn" data-ack-id="${escapeHtml(a.id)}" title="확인(ack)">ack</button>`;
         return `
-        <div class="alarm-chip sev-${sev}">
+        <div class="alarm-chip sev-${sev} ${ackCls}">
             <span class="alarm-sev-dot"></span>
             <span class="alarm-host">${escapeHtml(a.hostName || a.hostId || '')}</span>
             <span class="alarm-type">${escapeHtml(a.type || '')}</span>
             <span class="alarm-msg">${escapeHtml(a.message || '')}</span>
             <span class="alarm-time mono">${fmtTime(new Date(a.firedAt).getTime())}</span>
+            ${ackBtn}
         </div>`;
     }).join('') + (active.length > 5 ? `<span class="alarm-more">+${active.length - 5}</span>` : '');
+
+    strip.querySelectorAll('.alarm-ack-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = btn.dataset.ackId;
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+                const r = await fetch(`/api/alarms/${encodeURIComponent(id)}/ack`, { method: 'POST' });
+                if (!r.ok) throw new Error('ack failed');
+            } catch (e) {
+                console.warn('ack failed', e);
+                btn.disabled = false;
+                btn.textContent = 'ack';
+            }
+        });
+    });
 }
 
 // ===== Endpoints =====
@@ -906,6 +970,8 @@ function renderAll() {
     renderEndpoints();
     renderAlarms();
     renderXlog();
+    renderProbes();
+    renderHistoryChart();
     syncModalChart();
 }
 
@@ -948,7 +1014,7 @@ async function loadInitial() {
         state.xlog = (xlogList || []).slice().sort((a, b) => a.timestamp - b.timestamp).slice(-MAX_XLOG);
         state.alarmsActive = alarms.active || [];
         state.alarmsHistory = alarms.history || [];
-        await Promise.all([fetchEndpoints(), fetchStatusDistribution(), fetchSlowQueries()]);
+        await Promise.all([fetchEndpoints(), fetchStatusDistribution(), fetchSlowQueries(), fetchProbes(), fetchHistoryForScope()]);
         renderAll();
     } catch (e) {
         console.warn('Initial load failed:', e);
@@ -960,8 +1026,167 @@ function scheduleAnalyticsRefresh() {
         fetchEndpoints();
         fetchStatusDistribution();
         fetchSlowQueries();
+        fetchProbes();
     }, 15000);
+    setInterval(() => {
+        fetchHistoryForScope();
+    }, 60000);
 }
+
+// ===== Probes =====
+async function fetchProbes() {
+    try {
+        const r = await fetch('/api/probes');
+        state.probes = (await r.json()) || [];
+        renderProbes();
+    } catch (e) {
+        console.warn('probes fetch failed:', e);
+    }
+}
+
+function renderProbes() {
+    const card = document.getElementById('probes-card');
+    const list = document.getElementById('probes-list');
+    const sub = document.getElementById('probes-sub');
+    if (!state.probes || state.probes.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = '';
+    const up = state.probes.filter(p => p.status === 'UP').length;
+    const slow = state.probes.filter(p => p.status === 'SLOW').length;
+    const down = state.probes.filter(p => p.status === 'DOWN').length;
+    sub.textContent = `${state.probes.length}개 · UP ${up} · SLOW ${slow} · DOWN ${down}`;
+    list.innerHTML = state.probes.map(p => {
+        const cls = p.status === 'UP' ? 'up' : (p.status === 'SLOW' ? 'warn' : 'down');
+        const err = p.error ? ` · <span class="probe-err">${escapeHtml(p.error)}</span>` : '';
+        const statusText = p.statusCode ? `HTTP ${p.statusCode}` : p.type.toUpperCase();
+        return `<div class="probe-row probe-${cls}">
+            <span class="probe-dot"></span>
+            <span class="probe-name">${escapeHtml(p.name)}</span>
+            <span class="probe-target mono">${escapeHtml(p.target)}</span>
+            <span class="probe-meta">${statusText} · ${p.elapsedMs}ms${err}</span>
+        </div>`;
+    }).join('');
+}
+
+// ===== History =====
+function historyTargetHostId() {
+    if (state.scope && state.scope !== 'all') return state.scope;
+    const hostIds = Object.keys(state.hosts).sort();
+    return hostIds.length ? hostIds[0] : null;
+}
+
+async function fetchHistoryForScope() {
+    if (state.scope === 'all') {
+        state.historyData = [];
+        document.getElementById('history-sub').textContent = '호스트를 선택하세요';
+        renderHistoryChart();
+        return;
+    }
+    const hostId = state.scope;
+    const rangeMs = RANGE_MS[state.historyRange] || RANGE_MS['6h'];
+    const to = Date.now();
+    const from = to - rangeMs;
+    try {
+        const r = await fetch(`/api/metrics/${encodeURIComponent(hostId)}/range?from=${from}&to=${to}&maxPoints=300`);
+        state.historyData = (await r.json()) || [];
+        document.getElementById('history-sub').textContent =
+            `${state.hosts[hostId]?.displayName || hostId} · ${state.historyData.length} points · ${state.historyRange}`;
+        renderHistoryChart();
+    } catch (e) {
+        console.warn('history fetch failed:', e);
+    }
+}
+
+function historyBaseConfig(title, datasets, yMax, yUnit) {
+    return {
+        type: 'line',
+        data: { labels: [], datasets: datasets.map(d => ({
+            label: d.label, data: [], borderColor: d.color, backgroundColor: d.color + '22',
+            borderWidth: 1.5, pointRadius: 0, tension: 0.25, fill: datasets.length === 1
+        })) },
+        options: {
+            animation: false, responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: datasets.length > 1, labels: { color: '#cbd5e1' } },
+                title: { display: true, text: title, color: '#e2e8f0', font: { size: 12, weight: 'normal' } },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { ticks: { color: '#64748b', maxTicksLimit: 6, autoSkip: true }, grid: { color: '#1e293b' } },
+                y: {
+                    min: 0, max: yMax,
+                    ticks: {
+                        color: '#64748b',
+                        callback: yUnit === 'bytes'
+                            ? (v) => fmtBytes(v) + '/s'
+                            : (v) => v
+                    },
+                    grid: { color: '#1e293b' }
+                }
+            }
+        }
+    };
+}
+
+function renderHistoryChart() {
+    const empty = document.getElementById('history-empty');
+    const data = state.historyData || [];
+    if (!state.charts.historyCpu) {
+        const cpuCanvas = document.getElementById('history-cpu');
+        const memCanvas = document.getElementById('history-mem');
+        const loadCanvas = document.getElementById('history-load');
+        const netCanvas = document.getElementById('history-net');
+        if (!cpuCanvas || !memCanvas || !loadCanvas || !netCanvas) return;
+        state.charts.historyCpu = new Chart(cpuCanvas,
+            historyBaseConfig('CPU %', [{ label: 'CPU %', color: '#38bdf8' }], 100));
+        state.charts.historyMem = new Chart(memCanvas,
+            historyBaseConfig('Memory %', [{ label: 'Memory %', color: '#a78bfa' }], 100));
+        state.charts.historyLoad = new Chart(loadCanvas,
+            historyBaseConfig('Load 1m', [{ label: 'Load 1m', color: '#fbbf24' }], undefined));
+        state.charts.historyNet = new Chart(netCanvas,
+            historyBaseConfig('Network', [
+                { label: 'RX', color: '#34d399' },
+                { label: 'TX', color: '#f472b6' }
+            ], undefined, 'bytes'));
+    }
+    if (data.length === 0) {
+        empty.style.display = '';
+        ['historyCpu', 'historyMem', 'historyLoad', 'historyNet'].forEach(k => {
+            const c = state.charts[k];
+            c.data.labels = [];
+            c.data.datasets.forEach(ds => ds.data = []);
+            c.update('none');
+        });
+        return;
+    }
+    empty.style.display = 'none';
+    const labels = data.map(p => fmtTimeShort(p.ts));
+    state.charts.historyCpu.data.labels = labels;
+    state.charts.historyCpu.data.datasets[0].data = data.map(p => p.cpu);
+    state.charts.historyCpu.update('none');
+    state.charts.historyMem.data.labels = labels;
+    state.charts.historyMem.data.datasets[0].data = data.map(p => p.mem);
+    state.charts.historyMem.update('none');
+    state.charts.historyLoad.data.labels = labels;
+    state.charts.historyLoad.data.datasets[0].data = data.map(p => p.load1);
+    state.charts.historyLoad.update('none');
+    state.charts.historyNet.data.labels = labels;
+    state.charts.historyNet.data.datasets[0].data = data.map(p => p.rxBps);
+    state.charts.historyNet.data.datasets[1].data = data.map(p => p.txBps);
+    state.charts.historyNet.update('none');
+}
+
+document.getElementById('history-range').addEventListener('click', (e) => {
+    const btn = e.target.closest('.range-btn');
+    if (!btn) return;
+    state.historyRange = btn.dataset.range;
+    document.querySelectorAll('#history-range .range-btn')
+        .forEach(b => b.classList.toggle('active', b === btn));
+    fetchHistoryForScope();
+});
 
 // ===== Slow queries =====
 async function fetchSlowQueries() {

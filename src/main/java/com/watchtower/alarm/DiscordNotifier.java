@@ -10,30 +10,30 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 @Slf4j
 @Component
-public class SlackNotifier implements Notifier {
+public class DiscordNotifier implements Notifier {
 
     private final WebClient webClient = WebClient.builder().build();
     private final MonitorProperties properties;
 
-    public SlackNotifier(MonitorProperties properties) {
+    public DiscordNotifier(MonitorProperties properties) {
         this.properties = properties;
     }
 
     @Override
     public void send(AlarmEvent alarm) {
-        String url = properties.getAlarms().getSlackWebhookUrl();
+        String url = properties.getAlarms().getDiscordWebhookUrl();
         if (url == null || url.isBlank()) return;
 
         String emoji = switch (alarm.severity()) {
-            case CRIT -> ":rotating_light:";
-            case WARN -> ":warning:";
-            default -> ":information_source:";
+            case CRIT -> "\uD83D\uDEA8";
+            case WARN -> "\u26A0\uFE0F";
+            default -> "\u2139\uFE0F";
         };
-        String verb = alarm.state() == AlarmEvent.State.RESOLVED ? "RESOLVED :white_check_mark:" : "FIRING";
-        String text = String.format("%s *[%s]* %s · `%s` · %s",
+        String verb = alarm.state() == AlarmEvent.State.RESOLVED ? "RESOLVED \u2705" : "FIRING";
+        String text = String.format("%s **[%s]** %s \u00B7 `%s` \u00B7 %s",
                 emoji, verb, alarm.type(), alarm.hostName(), alarm.message());
 
-        Map<String, Object> body = Map.of("text", text);
+        Map<String, Object> body = Map.of("content", text);
         try {
             webClient.post().uri(url)
                     .bodyValue(body)
@@ -42,7 +42,7 @@ public class SlackNotifier implements Notifier {
                     .timeout(Duration.ofSeconds(5))
                     .block();
         } catch (Exception e) {
-            log.warn("Slack webhook failed: {}", e.getMessage());
+            log.warn("Discord webhook failed: {}", e.getMessage());
         }
     }
 }

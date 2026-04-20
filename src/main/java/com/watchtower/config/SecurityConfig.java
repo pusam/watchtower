@@ -48,15 +48,33 @@ public class SecurityConfig {
     }
 
     /**
-     * Dashboard & API: HTTP Basic authentication.
+     * Actuator health endpoint: public (for LB/k8s probes).
      */
     @Bean
     @Order(2)
+    public SecurityFilterChain actuatorFilterChain(HttpSecurity http) throws Exception {
+        http
+            .securityMatcher("/actuator/health", "/actuator/health/**", "/actuator/info")
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    /**
+     * Dashboard & API: HTTP Basic authentication.
+     */
+    @Bean
+    @Order(3)
     public SecurityFilterChain dashboardFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                     .requestMatchers("/css/**", "/js/**", "/favicon.ico").permitAll()
+                    .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/alarms/*/ack").hasAnyRole("ADMIN", "OPERATOR")
+                    .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/maintenance/**").hasAnyRole("ADMIN", "OPERATOR")
+                    .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/**").hasRole("ADMIN")
+                    .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/**").hasRole("ADMIN")
+                    .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/**").hasRole("ADMIN")
                     .anyRequest().authenticated())
             .httpBasic(basic -> {});
         return http.build();
@@ -65,12 +83,25 @@ public class SecurityConfig {
     @Bean
     public UserDetailsService userDetailsService(PasswordEncoder encoder) {
         MonitorProperties.Security sec = properties.getSecurity();
-        var user = User.builder()
+        java.util.List<org.springframework.security.core.userdetails.UserDetails> principals = new java.util.ArrayList<>();
+        principals.add(User.builder()
                 .username(sec.getDashboardUsername())
                 .password(encoder.encode(sec.getDashboardPassword()))
                 .roles("ADMIN")
-                .build();
-        return new InMemoryUserDetailsManager(user);
+                .build());
+        if (sec.getUsers() != null) {
+            for (MonitorProperties.DashboardUser u : sec.getUsers()) {
+                if (u.getUsername() == null || u.getUsername().isBlank()) continue;
+                if (u.getUsername().equals(sec.getDashboardUsername())) continue;
+                String role = u.getRole() == null ? "VIEWER" : u.getRole().toUpperCase();
+                principals.add(User.builder()
+                        .username(u.getUsername())
+                        .password(encoder.encode(u.getPassword() == null ? "" : u.getPassword()))
+                        .roles(role)
+                        .build());
+            }
+        }
+        return new InMemoryUserDetailsManager(principals);
     }
 
     @Bean

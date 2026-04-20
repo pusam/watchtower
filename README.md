@@ -229,6 +229,185 @@ export WATCHTOWER_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
 
 ---
 
+## 운영 배포 (HTTPS / 리버스 프록시)
+
+Watchtower는 기본 포트 9090으로 HTTP 만 리스닝한다. 운영에서는 nginx 또는 Caddy 같은 리버스 프록시 뒤에 두는 것을 권장한다.
+
+### nginx 예시
+
+```nginx
+upstream watchtower {
+    server 127.0.0.1:9090;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name watchtower.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/watchtower.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/watchtower.example.com/privkey.pem;
+
+    # WebSocket (SockJS/STOMP) 지원
+    location /ws {
+        proxy_pass http://watchtower;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://watchtower;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 80;
+    server_name watchtower.example.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+### Caddy 예시 (자동 TLS)
+
+```caddy
+watchtower.example.com {
+    reverse_proxy 127.0.0.1:9090
+}
+```
+
+### application.yml 권장 설정
+
+리버스 프록시 뒤에서는 다음을 `application.yml` 또는 환경변수로 설정한다:
+
+```yaml
+server:
+  forward-headers-strategy: native
+watchtower:
+  security:
+    allowed-origins:
+      - https://watchtower.example.com
+```
+
+### 에이전트 엔드포인트
+
+에이전트(`watchtower-agent.sh`)의 `WATCHTOWER_URL`도 HTTPS URL로 변경해야 한다. 자체 서명 인증서를 쓰는 경우 `curl --cacert` 옵션 또는 신뢰된 CA를 사용할 것.
+
+### 방화벽
+
+- 443 (또는 80): 리버스 프록시 외부 노출
+- 9090: `localhost`에서만 접근 (외부 노출 금지)
+
+---
+
+## 사용자 / 권한
+
+`watchtower.security.users`에 여러 사용자와 역할(ADMIN / OPERATOR / VIEWER)을 설정할 수 있다:
+
+```yaml
+watchtower:
+  security:
+    dashboard-username: admin
+    dashboard-password: changeme
+    users:
+      - username: ops
+        password: opspass
+        role: OPERATOR
+      - username: viewer
+        password: viewpass
+        role: VIEWER
+```
+
+| 역할 | 권한 |
+|------|------|
+| ADMIN | 모든 API (POST/PUT/DELETE 포함) |
+| OPERATOR | 조회 + 알람 ack + 유지보수 뮤트 |
+| VIEWER | 조회 전용 |
+
+---
+
+## 알림 채널
+
+동시에 여러 웹훅을 설정할 수 있다:
+
+```yaml
+watchtower:
+  alarms:
+    slack-webhook-url: https://hooks.slack.com/services/...
+    discord-webhook-url: https://discord.com/api/webhooks/...
+    generic-webhook-url: https://example.com/alert    # JSON POST
+```
+
+`generic-webhook-url`은 다음 형식의 JSON을 POST한다:
+
+```json
+{
+  "id": "uuid",
+  "hostId": "host-1",
+  "hostName": "web-01",
+  "type": "CPU",
+  "severity": "WARN",
+  "state": "FIRING",
+  "message": "CPU 사용률 92.3%",
+  "value": 92.3,
+  "threshold": 90.0,
+  "firedAt": 1712345678901,
+  "resolvedAt": null,
+  "acknowledged": false,
+  "acknowledgedBy": null
+}
+```
+
+---
+
+## 유지보수 창 (Maintenance Window)
+
+배포/점검 중 알림을 끄려면:
+
+1. **일시 뮤트 (런타임)** - 헤더의 `알림 뮤트` 버튼 또는 `POST /api/maintenance/mute`
+   ```bash
+   curl -u admin:changeme -X POST http://localhost:9090/api/maintenance/mute \
+        -H 'Content-Type: application/json' \
+        -d '{"durationSec": 3600}'         # 1시간 전체 뮤트
+   # 특정 호스트만
+   curl -u admin:changeme -X POST http://localhost:9090/api/maintenance/mute \
+        -H 'Content-Type: application/json' \
+        -d '{"hostId": "web-01", "durationSec": 1800}'
+   # 해제
+   curl -u admin:changeme -X POST http://localhost:9090/api/maintenance/unmute
+   ```
+2. **스케줄 기반 (config)**
+   ```yaml
+   watchtower:
+     maintenance:
+       - name: weekly-deploy
+         from: 2026-04-25T02:00:00+09:00
+         to:   2026-04-25T03:00:00+09:00
+         hostIds: [ web-01, web-02 ]   # 비우면 전체
+   ```
+
+---
+
+## 알람 ack (확인)
+
+알람 카드의 `ack` 버튼 또는:
+
+```bash
+curl -u operator:pass -X POST http://localhost:9090/api/alarms/<alarm-id>/ack
+```
+
+ack된 알람은 조건이 지속되어도 추가 슬랙/디스코드 알림이 발송되지 않는다. 해결(RESOLVED) 시점에는 다시 알림이 간다.
+
+---
+
 ## 문제 해결
 
 | 증상 | 원인/해결 |
