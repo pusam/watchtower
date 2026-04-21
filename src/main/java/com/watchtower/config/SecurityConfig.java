@@ -5,6 +5,8 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -22,6 +24,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -31,6 +34,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class SecurityConfig {
 
     private final MonitorProperties properties;
+    private final LoginRateLimiter loginRateLimiter;
 
     /**
      * Agent endpoint: API key header authentication, stateless.
@@ -70,6 +74,7 @@ public class SecurityConfig {
         http
             .csrf(csrf -> csrf
                     .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+            .addFilterBefore(new LoginRateLimitFilter(loginRateLimiter), BasicAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
                     .requestMatchers("/css/**", "/js/**", "/favicon.ico").permitAll()
                     .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/alarms/*/ack").hasAnyRole("ADMIN", "OPERATOR")
@@ -114,12 +119,63 @@ public class SecurityConfig {
     /**
      * Filter that validates the X-API-Key header for agent endpoints.
      */
+    /**
+     * Blocks dashboard authentication attempts from an IP after too many failures
+     * and records basic-auth failures/successes observed after the Basic filter runs.
+     */
+    static class LoginRateLimitFilter extends OncePerRequestFilter {
+
+        private final LoginRateLimiter limiter;
+
+        LoginRateLimitFilter(LoginRateLimiter limiter) {
+            this.limiter = limiter;
+        }
+
+        @Override
+        protected void doFilterInternal(HttpServletRequest request,
+                                        HttpServletResponse response,
+                                        FilterChain filterChain) throws ServletException, IOException {
+            String ip = clientIp(request);
+            if (limiter.isBlocked(ip)) {
+                response.setStatus(429);
+                response.setHeader("Retry-After", "900");
+                response.setContentType("application/json");
+                response.getWriter().write(
+                        "{\"error\":\"too many failed login attempts; try again later\"}");
+                return;
+            }
+
+            filterChain.doFilter(request, response);
+
+            if (request.getHeader("Authorization") == null) {
+                return;
+            }
+            int status = response.getStatus();
+            if (status == HttpServletResponse.SC_UNAUTHORIZED) {
+                limiter.recordFailure(ip);
+            } else if (status < 400 && request.getUserPrincipal() != null) {
+                limiter.recordSuccess(ip);
+            }
+        }
+
+        private static String clientIp(HttpServletRequest request) {
+            String fwd = request.getHeader("X-Forwarded-For");
+            if (fwd != null && !fwd.isBlank()) {
+                int comma = fwd.indexOf(',');
+                return (comma < 0 ? fwd : fwd.substring(0, comma)).trim();
+            }
+            return request.getRemoteAddr();
+        }
+    }
+
     static class ApiKeyFilter extends OncePerRequestFilter {
 
-        private final String expectedKey;
+        private final byte[] expectedKeyBytes;
 
         ApiKeyFilter(String expectedKey) {
-            this.expectedKey = expectedKey;
+            this.expectedKeyBytes = expectedKey == null || expectedKey.isBlank()
+                    ? null
+                    : expectedKey.getBytes(StandardCharsets.UTF_8);
         }
 
         @Override
@@ -127,7 +183,8 @@ public class SecurityConfig {
                                         HttpServletResponse response,
                                         FilterChain filterChain) throws ServletException, IOException {
             String provided = request.getHeader("X-API-Key");
-            if (expectedKey != null && !expectedKey.isBlank() && expectedKey.equals(provided)) {
+            if (expectedKeyBytes != null && provided != null
+                    && MessageDigest.isEqual(expectedKeyBytes, provided.getBytes(StandardCharsets.UTF_8))) {
                 SecurityContextHolder.getContext().setAuthentication(
                         new UsernamePasswordAuthenticationToken("agent", null, List.of()));
                 filterChain.doFilter(request, response);
