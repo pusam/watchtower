@@ -21,5 +21,5 @@ EXPOSE 9090
 ENV JAVA_OPTS="-Xms256m -Xmx512m" \
     WATCHTOWER_DB_PATH=/data/watchtower.db
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS -o /dev/null http://localhost:9090/login || exit 1
+    CMD curl -fsS -o /dev/null http://localhost:9090/actuator/health || exit 1
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

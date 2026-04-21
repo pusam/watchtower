@@ -44,8 +44,8 @@ watchtower:
     host-down-threshold-ms: 30000
   security:
     dashboard-username: ${WATCHTOWER_DASHBOARD_USER:admin}
-    dashboard-password: ${WATCHTOWER_DASHBOARD_PASS:changeme}
-    agent-api-key: ${WATCHTOWER_AGENT_API_KEY:changeme-agent-key}
+    dashboard-password: ${WATCHTOWER_DASHBOARD_PASS:}
+    agent-api-key: ${WATCHTOWER_AGENT_API_KEY:}
     allowed-origins:
       - ${WATCHTOWER_ALLOWED_ORIGIN:http://localhost:9090}
       - https://*.ngrok-free.dev

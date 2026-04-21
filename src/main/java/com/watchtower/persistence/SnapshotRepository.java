@@ -29,9 +29,9 @@ public class SnapshotRepository {
                     "INSERT OR REPLACE INTO host_snapshot(host_id, ts, payload) VALUES (?, ?, ?)",
                     snap.hostId(), snap.timestamp().toEpochMilli(), json);
         } catch (JsonProcessingException e) {
-            log.warn("snapshot serialize failed host={} err={}", snap.hostId(), e.getMessage());
+            log.warn("snapshot serialize failed host={}", snap.hostId(), e);
         } catch (Exception e) {
-            log.warn("snapshot persist failed host={} err={}", snap.hostId(), e.getMessage());
+            log.warn("snapshot persist failed host={}", snap.hostId(), e);
         }
     }
 
@@ -48,7 +48,7 @@ public class SnapshotRepository {
                 try {
                     snaps.add(mapper.readValue(json, HostSnapshot.class));
                 } catch (Exception e) {
-                    log.warn("snapshot deserialize failed host={} err={}", hostId, e.getMessage());
+                    log.warn("snapshot deserialize failed host={}", hostId, e);
                 }
             }
             for (int i = snaps.size() - 1; i >= 0; i--) all.add(snaps.get(i));
@@ -85,7 +85,7 @@ public class SnapshotRepository {
             try {
                 out.add(mapper.readValue(json, HostSnapshot.class));
             } catch (Exception e) {
-                log.warn("range deserialize failed host={} err={}", hostId, e.getMessage());
+                log.warn("range deserialize failed host={}", hostId, e);
             }
         }
         return out;

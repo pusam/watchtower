@@ -25,7 +25,7 @@ public class ProbeResultRepository {
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     r.probeId(), ts, r.status().name(), r.elapsedMs(), r.statusCode(), r.error());
         } catch (Exception e) {
-            log.warn("probe_result persist failed id={} err={}", r.probeId(), e.getMessage());
+            log.warn("probe_result persist failed id={}", r.probeId(), e);
         }
     }
 

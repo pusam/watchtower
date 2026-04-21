@@ -6,11 +6,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
+@Slf4j
 @Component
 public class AgentClient {
+
+    private static final int MAX_ATTEMPTS = 2;
 
     private final WebClient webClient;
     private final Duration timeout;
@@ -22,20 +27,37 @@ public class AgentClient {
 
     @SuppressWarnings("unchecked")
     public HostSnapshot fetch(MonitorProperties.HostTarget target) {
-        try {
-            Map<String, Object> raw = webClient.get()
-                    .uri(target.getAgentUrl() + "/agent/metrics")
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .timeout(timeout)
-                    .block();
-            if (raw == null) {
-                return HostSnapshot.down(target.getId(), target.getName(), "empty response");
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                Map<String, Object> raw = webClient.get()
+                        .uri(target.getAgentUrl() + "/agent/metrics")
+                        .retrieve()
+                        .bodyToMono(Map.class)
+                        .timeout(timeout)
+                        .block();
+                if (raw == null) {
+                    lastError = new IllegalStateException("empty response");
+                } else {
+                    return parse(target, raw);
+                }
+            } catch (Exception e) {
+                lastError = e;
             }
-            return parse(target, raw);
-        } catch (Exception e) {
-            return HostSnapshot.down(target.getId(), target.getName(), e.getClass().getSimpleName() + ": " + e.getMessage());
+            if (attempt < MAX_ATTEMPTS) {
+                long jitterMs = 100L + ThreadLocalRandom.current().nextLong(200L);
+                try {
+                    Thread.sleep(jitterMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
+        String msg = lastError == null ? "unknown" :
+                lastError.getClass().getSimpleName() + ": " + lastError.getMessage();
+        log.debug("agent fetch failed host={} after {} attempts: {}", target.getId(), MAX_ATTEMPTS, msg);
+        return HostSnapshot.down(target.getId(), target.getName(), msg);
     }
 
     @SuppressWarnings("unchecked")

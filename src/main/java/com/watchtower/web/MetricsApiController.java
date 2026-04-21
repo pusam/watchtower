@@ -32,6 +32,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class MetricsApiController {
 
+    private static final int MAX_XLOG_RETURN = 500;
+    private static final int MAX_SLOW_QUERIES_RETURN = 500;
+    private static final int MAX_RANGE_POINTS = 2000;
+    private static final long MAX_RANGE_WINDOW_MS = 30L * 24 * 3600 * 1000; // 30 days
+
     private final MetricsStore store;
     private final AlarmEngine alarmEngine;
     private final EndpointStatsService endpointStats;
@@ -56,13 +61,24 @@ public class MetricsApiController {
     }
 
     @GetMapping("/xlog")
-    public List<HostSnapshot.RequestLog> xlogAll() {
-        return store.xlogAll();
+    public List<HostSnapshot.RequestLog> xlogAll(
+            @RequestParam(defaultValue = "200") int limit) {
+        return truncate(store.xlogAll(), clamp(limit, MAX_XLOG_RETURN));
     }
 
     @GetMapping("/xlog/{hostId}")
-    public List<HostSnapshot.RequestLog> xlog(@PathVariable String hostId) {
-        return store.xlog(hostId);
+    public List<HostSnapshot.RequestLog> xlog(@PathVariable String hostId,
+                                              @RequestParam(defaultValue = "200") int limit) {
+        return truncate(store.xlog(hostId), clamp(limit, MAX_XLOG_RETURN));
+    }
+
+    private static <T> List<T> truncate(List<T> src, int limit) {
+        return src.size() <= limit ? src : src.subList(0, limit);
+    }
+
+    private static int clamp(int v, int max) {
+        if (v <= 0) return 1;
+        return Math.min(v, max);
     }
 
     @GetMapping("/alarms")
@@ -94,8 +110,11 @@ public class MetricsApiController {
     }
 
     @GetMapping("/slow-queries/recent")
-    public List<HostSnapshot.SlowQuery> slowQueriesRecent(@RequestParam(required = false) String hostId) {
-        return hostId == null || hostId.isBlank() ? store.slowQueriesAll() : store.slowQueries(hostId);
+    public List<HostSnapshot.SlowQuery> slowQueriesRecent(@RequestParam(required = false) String hostId,
+                                                          @RequestParam(defaultValue = "200") int limit) {
+        List<HostSnapshot.SlowQuery> src = hostId == null || hostId.isBlank()
+                ? store.slowQueriesAll() : store.slowQueries(hostId);
+        return truncate(src, clamp(limit, MAX_SLOW_QUERIES_RETURN));
     }
 
     @GetMapping("/probes")
@@ -141,7 +160,12 @@ public class MetricsApiController {
                                        @RequestParam(defaultValue = "300") int maxPoints) {
         SnapshotRepository repo = snapshotRepoProvider.getIfAvailable();
         if (repo == null || from >= to) return List.of();
-        List<HostSnapshot> snaps = repo.loadRange(hostId, from, to, maxPoints);
+        long windowMs = to - from;
+        if (windowMs > MAX_RANGE_WINDOW_MS) {
+            from = to - MAX_RANGE_WINDOW_MS;
+        }
+        int boundedMaxPoints = clamp(maxPoints, MAX_RANGE_POINTS);
+        List<HostSnapshot> snaps = repo.loadRange(hostId, from, to, boundedMaxPoints);
         List<TimeSeriesPoint> out = new ArrayList<>(snaps.size());
         for (HostSnapshot s : snaps) {
             if (s.timestamp() == null) continue;

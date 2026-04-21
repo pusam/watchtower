@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -17,9 +18,14 @@ import org.springframework.stereotype.Repository;
 public class AlarmRepository {
 
     private final JdbcTemplate jdbc;
+    private final AtomicLong persistFailures = new AtomicLong();
 
     public AlarmRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    public long getPersistFailureCount() {
+        return persistFailures.get();
     }
 
     public void upsert(AlarmEvent ev, String qualifier) {
@@ -48,7 +54,8 @@ public class AlarmRepository {
                     ev.acknowledgedAt() == null ? null : ev.acknowledgedAt().toEpochMilli(),
                     ev.acknowledgedBy());
         } catch (Exception e) {
-            log.warn("alarm persist failed id={} err={}", ev.id(), e.getMessage());
+            persistFailures.incrementAndGet();
+            log.warn("alarm persist failed id={}", ev.id(), e);
         }
     }
 
@@ -93,7 +100,8 @@ public class AlarmRepository {
                     "ON CONFLICT(alarm_key) DO UPDATE SET last_notified = excluded.last_notified",
                     key, epochMs);
         } catch (Exception e) {
-            log.warn("lastNotified persist failed key={} err={}", key, e.getMessage());
+            persistFailures.incrementAndGet();
+            log.warn("lastNotified persist failed key={}", key, e);
         }
     }
 
@@ -101,7 +109,8 @@ public class AlarmRepository {
         try {
             jdbc.update("DELETE FROM alarm_notify WHERE alarm_key = ?", key);
         } catch (Exception e) {
-            log.warn("lastNotified delete failed key={} err={}", key, e.getMessage());
+            persistFailures.incrementAndGet();
+            log.warn("lastNotified delete failed key={}", key, e);
         }
     }
 

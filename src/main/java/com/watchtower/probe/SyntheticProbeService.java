@@ -6,6 +6,7 @@ import com.watchtower.domain.AlarmEvent;
 import com.watchtower.domain.ProbeResult;
 import com.watchtower.persistence.ProbeResultRepository;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.ObjectProvider;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -76,7 +77,7 @@ public class SyntheticProbeService {
             persist(result);
             evaluateAlarms(p, result);
         } catch (Exception e) {
-            log.warn("probe {} failed: {}", p.getId(), e.getMessage());
+            log.warn("probe {} failed", p.getId(), e);
         }
     }
 
@@ -186,5 +187,18 @@ public class SyntheticProbeService {
         List<ProbeResult> all = new ArrayList<>(lastResults.values());
         all.sort((a, b) -> a.name().compareToIgnoreCase(b.name()));
         return all;
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }

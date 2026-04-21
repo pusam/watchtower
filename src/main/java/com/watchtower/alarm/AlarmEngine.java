@@ -86,7 +86,7 @@ public class AlarmEngine {
             log.info("restored {} active alarms, {} history, {} cooldown entries",
                     active.size(), recent.size(), lastNotified.size());
         } catch (Exception e) {
-            log.warn("alarm restore failed: {}", e.getMessage());
+            log.warn("alarm restore failed", e);
         }
     }
 
@@ -215,16 +215,31 @@ public class AlarmEngine {
     }
 
     public boolean acknowledge(String alarmId, String user) {
-        for (Map.Entry<String, AlarmEvent> e : active.entrySet()) {
-            AlarmEvent cur = e.getValue();
-            if (!cur.id().equals(alarmId)) continue;
-            if (cur.acknowledged()) return true;
-            AlarmEvent acked = cur.acknowledge(Instant.now(), user == null ? "unknown" : user);
-            active.put(e.getKey(), acked);
+        String effectiveUser = user == null ? "unknown" : user;
+        Instant now = Instant.now();
+        for (Map.Entry<String, AlarmEvent> entry : active.entrySet()) {
+            if (!entry.getValue().id().equals(alarmId)) continue;
+            String mapKey = entry.getKey();
+            AlarmEvent[] result = new AlarmEvent[1];
+            boolean[] changed = new boolean[1];
+            active.computeIfPresent(mapKey, (k, cur) -> {
+                if (!cur.id().equals(alarmId)) return cur;
+                if (cur.acknowledged()) {
+                    result[0] = cur;
+                    return cur;
+                }
+                AlarmEvent acked = cur.acknowledge(now, effectiveUser);
+                result[0] = acked;
+                changed[0] = true;
+                return acked;
+            });
+            AlarmEvent acked = result[0];
+            if (acked == null) continue;
+            if (!changed[0]) return true;
             appendHistory(acked);
-            persist(acked, qualifierFromKey(e.getKey()));
+            persist(acked, qualifierFromKey(mapKey));
             publisher.publishAlarm(acked);
-            log.info("alarm {} acknowledged by {}", alarmId, user);
+            log.info("alarm {} acknowledged by {}", alarmId, effectiveUser);
             return true;
         }
         return false;

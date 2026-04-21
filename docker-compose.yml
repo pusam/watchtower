@@ -10,8 +10,8 @@ services:
       - "9090:9090"
     environment:
       WATCHTOWER_DASHBOARD_USER: ${WATCHTOWER_DASHBOARD_USER:-admin}
-      WATCHTOWER_DASHBOARD_PASS: ${WATCHTOWER_DASHBOARD_PASS:-changeme}
-      WATCHTOWER_AGENT_API_KEY: ${WATCHTOWER_AGENT_API_KEY:-changeme-agent-key}
+      WATCHTOWER_DASHBOARD_PASS: ${WATCHTOWER_DASHBOARD_PASS:?WATCHTOWER_DASHBOARD_PASS is required}
+      WATCHTOWER_AGENT_API_KEY: ${WATCHTOWER_AGENT_API_KEY:?WATCHTOWER_AGENT_API_KEY is required}
       WATCHTOWER_SLACK_WEBHOOK: ${WATCHTOWER_SLACK_WEBHOOK:-}
       WATCHTOWER_ALLOWED_ORIGIN: ${WATCHTOWER_ALLOWED_ORIGIN:-http://localhost:9090}
       WATCHTOWER_DB_PATH: /data/watchtower.db
@@ -19,7 +19,7 @@ services:
     volumes:
       - watchtower-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:9090/login || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:9090/actuator/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

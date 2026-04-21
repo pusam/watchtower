@@ -21,7 +21,7 @@ public class NotificationDispatcher {
             try {
                 n.send(alarm);
             } catch (Exception e) {
-                log.warn("notifier {} failed: {}", n.getClass().getSimpleName(), e.getMessage());
+                log.warn("notifier {} failed", n.getClass().getSimpleName(), e);
             }
         }
     }

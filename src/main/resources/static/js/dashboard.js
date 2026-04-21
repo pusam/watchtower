@@ -22,6 +22,18 @@ const state = {
 
 const RANGE_MS = { '1h': 3600e3, '6h': 6*3600e3, '24h': 24*3600e3, '7d': 7*24*3600e3 };
 
+// ===== CSRF =====
+function csrfToken() {
+    const m = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+function csrfHeaders(extra) {
+    const h = Object.assign({}, extra || {});
+    const t = csrfToken();
+    if (t) h['X-XSRF-TOKEN'] = t;
+    return h;
+}
+
 // ===== Helpers =====
 function colorForHost(hostId) {
     if (state.hostColorIndex[hostId] == null) {
@@ -95,7 +107,7 @@ if (maintBtn) {
             try {
                 const r = await fetch('/api/maintenance/mute', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: csrfHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ durationSec: minutes * 60 })
                 });
                 if (!r.ok) throw new Error('mute failed');
@@ -108,7 +120,10 @@ if (maintBtn) {
             }
         } else {
             try {
-                const r = await fetch('/api/maintenance/unmute', { method: 'POST' });
+                const r = await fetch('/api/maintenance/unmute', {
+                    method: 'POST',
+                    headers: csrfHeaders()
+                });
                 if (!r.ok) throw new Error('unmute failed');
                 maintActive = false;
                 maintBtn.classList.remove('active');
@@ -843,7 +858,10 @@ function renderAlarms() {
             btn.disabled = true;
             btn.textContent = '...';
             try {
-                const r = await fetch(`/api/alarms/${encodeURIComponent(id)}/ack`, { method: 'POST' });
+                const r = await fetch(`/api/alarms/${encodeURIComponent(id)}/ack`, {
+                    method: 'POST',
+                    headers: csrfHeaders()
+                });
                 if (!r.ok) throw new Error('ack failed');
             } catch (e) {
                 console.warn('ack failed', e);

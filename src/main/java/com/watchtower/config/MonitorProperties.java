@@ -33,7 +33,7 @@ public class MonitorProperties {
     @Data
     public static class Security {
         private String dashboardUsername = "admin";
-        private String dashboardPassword = "changeme";
+        private String dashboardPassword = "";
         private String agentApiKey = "";
         private List<String> allowedOrigins = List.of("http://localhost:9090");
         private int maxRegistrationsPerMinute = 12;

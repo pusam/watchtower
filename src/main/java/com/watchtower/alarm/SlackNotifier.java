@@ -42,7 +42,7 @@ public class SlackNotifier implements Notifier {
                     .timeout(Duration.ofSeconds(5))
                     .block();
         } catch (Exception e) {
-            log.warn("Slack webhook failed: {}", e.getMessage());
+            log.warn("Slack webhook failed", e);
         }
     }
 }

@@ -48,7 +48,7 @@ public class GenericWebhookNotifier implements Notifier {
                     .timeout(Duration.ofSeconds(5))
                     .block();
         } catch (Exception e) {
-            log.warn("Generic webhook failed: {}", e.getMessage());
+            log.warn("Generic webhook failed", e);
         }
     }
 }

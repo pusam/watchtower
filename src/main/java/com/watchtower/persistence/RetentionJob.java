@@ -40,7 +40,7 @@ public class RetentionJob {
                         snapDeleted, alarmDeleted, probeDeleted);
             }
         } catch (Exception e) {
-            log.warn("retention pruning failed: {}", e.getMessage());
+            log.warn("retention pruning failed", e);
         }
     }
 }

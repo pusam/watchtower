@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -75,8 +76,17 @@ public class HostRegistry {
         return new ArrayList<>(hosts.values());
     }
 
+    private static final int RATE_LIMIT_MAX_ENTRIES = 10_000;
+
     public boolean tryConsume(String hostId) {
         int maxPerMinute = properties.getSecurity().getMaxRegistrationsPerMinute();
+        if (rateLimitBuckets.size() > RATE_LIMIT_MAX_ENTRIES && !rateLimitBuckets.containsKey(hostId)) {
+            cleanupRateLimitBuckets();
+            if (rateLimitBuckets.size() > RATE_LIMIT_MAX_ENTRIES) {
+                log.warn("rate limit map saturated; rejecting hostId={}", hostId);
+                return false;
+            }
+        }
         RateLimitEntry entry = rateLimitBuckets.compute(hostId, (id, existing) -> {
             long now = System.currentTimeMillis();
             if (existing == null || now - existing.windowStart > 60_000) {
@@ -90,6 +100,17 @@ public class HostRegistry {
             log.warn("rate limit exceeded for hostId={}", hostId);
         }
         return allowed;
+    }
+
+    @Scheduled(fixedDelay = 120_000L)
+    public void cleanupRateLimitBuckets() {
+        long cutoff = System.currentTimeMillis() - 180_000L;
+        int before = rateLimitBuckets.size();
+        rateLimitBuckets.entrySet().removeIf(e -> e.getValue().windowStart < cutoff);
+        int removed = before - rateLimitBuckets.size();
+        if (removed > 0) {
+            log.debug("evicted {} stale rate-limit entries", removed);
+        }
     }
 
     private static class RateLimitEntry {

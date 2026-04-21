@@ -42,7 +42,7 @@ public class DiscordNotifier implements Notifier {
                     .timeout(Duration.ofSeconds(5))
                     .block();
         } catch (Exception e) {
-            log.warn("Discord webhook failed: {}", e.getMessage());
+            log.warn("Discord webhook failed", e);
         }
     }
 }

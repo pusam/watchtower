@@ -316,7 +316,7 @@ watchtower:
 watchtower:
   security:
     dashboard-username: admin
-    dashboard-password: changeme
+    dashboard-password: ${WATCHTOWER_DASHBOARD_PASS}   # 반드시 환경변수로 주입 (미설정 시 기동 실패)
     users:
       - username: ops
         password: opspass
@@ -374,15 +374,15 @@ watchtower:
 
 1. **일시 뮤트 (런타임)** - 헤더의 `알림 뮤트` 버튼 또는 `POST /api/maintenance/mute`
    ```bash
-   curl -u admin:changeme -X POST http://localhost:9090/api/maintenance/mute \
+   curl -u admin:$WATCHTOWER_DASHBOARD_PASS -X POST http://localhost:9090/api/maintenance/mute \
         -H 'Content-Type: application/json' \
         -d '{"durationSec": 3600}'         # 1시간 전체 뮤트
    # 특정 호스트만
-   curl -u admin:changeme -X POST http://localhost:9090/api/maintenance/mute \
+   curl -u admin:$WATCHTOWER_DASHBOARD_PASS -X POST http://localhost:9090/api/maintenance/mute \
         -H 'Content-Type: application/json' \
         -d '{"hostId": "web-01", "durationSec": 1800}'
    # 해제
-   curl -u admin:changeme -X POST http://localhost:9090/api/maintenance/unmute
+   curl -u admin:$WATCHTOWER_DASHBOARD_PASS -X POST http://localhost:9090/api/maintenance/unmute
    ```
 2. **스케줄 기반 (config)**
    ```yaml

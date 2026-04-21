@@ -160,14 +160,27 @@ public class AgentReceiver {
     }
     private static long longVal(Map<String, Object> m, String k) {
         Object v = m.get(k);
-        return v instanceof Number n ? n.longValue() : 0L;
+        if (!(v instanceof Number n)) return 0L;
+        long raw = n.longValue();
+        return raw < 0 ? 0L : raw;
     }
     private static int intVal(Map<String, Object> m, String k) {
         Object v = m.get(k);
-        return v instanceof Number n ? n.intValue() : 0;
+        if (!(v instanceof Number n)) return 0;
+        int raw = n.intValue();
+        return raw < 0 ? 0 : raw;
     }
     private static double doubleVal(Map<String, Object> m, String k) {
         Object v = m.get(k);
-        return v instanceof Number n ? n.doubleValue() : 0.0;
+        if (!(v instanceof Number n)) return 0.0;
+        double raw = n.doubleValue();
+        if (Double.isNaN(raw) || Double.isInfinite(raw)) return 0.0;
+        if ("cpuUsedPct".equals(k) || "cpuPct".equals(k)) {
+            if (raw < 0) return 0.0;
+            if (raw > 100.0) return 100.0;
+        } else if (raw < 0) {
+            return 0.0;
+        }
+        return raw;
     }
 }
