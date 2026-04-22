@@ -47,7 +47,18 @@ watchtower:
   security:
     dashboard-username: ${WATCHTOWER_DASHBOARD_USER:admin}
     dashboard-password: ${WATCHTOWER_DASHBOARD_PASS:}
+    # Per-agent HMAC credentials (recommended). Generate secrets with: openssl rand -hex 32
+    # Override via env like WATCHTOWER_SECURITY_AGENTS_0_ID=server-a,
+    # WATCHTOWER_SECURITY_AGENTS_0_HMAC_SECRET=...
+    agents: []
+      # - id: server-a
+      #   hmac-secret: ${AGENT_SECRET_SERVER_A:}
+      # - id: server-b
+      #   hmac-secret: ${AGENT_SECRET_SERVER_B:}
+    # Legacy single-key fallback. Disable in production after migrating all agents.
     agent-api-key: ${WATCHTOWER_AGENT_API_KEY:}
+    allow-legacy-api-key: ${WATCHTOWER_ALLOW_LEGACY_API_KEY:true}
+    agent-max-clock-skew-seconds: 300
     allowed-origins:
       - ${WATCHTOWER_ALLOWED_ORIGIN:http://localhost:9090}
       - https://*.ngrok-free.dev

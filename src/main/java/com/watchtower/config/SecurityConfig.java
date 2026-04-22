@@ -5,18 +5,13 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -37,17 +32,23 @@ public class SecurityConfig {
     private final LoginRateLimiter loginRateLimiter;
 
     /**
-     * Agent endpoint: API key header authentication, stateless.
+     * Agent endpoint: per-agent HMAC signature authentication, stateless.
+     * Falls back to legacy single-key X-API-Key if allow-legacy-api-key is true.
      */
     @Bean
     @Order(1)
     public SecurityFilterChain agentFilterChain(HttpSecurity http) throws Exception {
+        MonitorProperties.Security sec = properties.getSecurity();
+        AgentSignatureFilter agentAuth = new AgentSignatureFilter(
+                sec.getAgents(),
+                sec.getAgentApiKey(),
+                sec.isAllowLegacyApiKey(),
+                sec.getAgentMaxClockSkewSeconds());
         http
             .securityMatcher("/api/agent/**")
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .addFilterBefore(new ApiKeyFilter(properties.getSecurity().getAgentApiKey()),
-                    UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(agentAuth, UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
         return http.build();
     }
@@ -117,9 +118,6 @@ public class SecurityConfig {
     }
 
     /**
-     * Filter that validates the X-API-Key header for agent endpoints.
-     */
-    /**
      * Blocks dashboard authentication attempts from an IP after too many failures
      * and records basic-auth failures/successes observed after the Basic filter runs.
      */
@@ -168,31 +166,4 @@ public class SecurityConfig {
         }
     }
 
-    static class ApiKeyFilter extends OncePerRequestFilter {
-
-        private final byte[] expectedKeyBytes;
-
-        ApiKeyFilter(String expectedKey) {
-            this.expectedKeyBytes = expectedKey == null || expectedKey.isBlank()
-                    ? null
-                    : expectedKey.getBytes(StandardCharsets.UTF_8);
-        }
-
-        @Override
-        protected void doFilterInternal(HttpServletRequest request,
-                                        HttpServletResponse response,
-                                        FilterChain filterChain) throws ServletException, IOException {
-            String provided = request.getHeader("X-API-Key");
-            if (expectedKeyBytes != null && provided != null
-                    && MessageDigest.isEqual(expectedKeyBytes, provided.getBytes(StandardCharsets.UTF_8))) {
-                SecurityContextHolder.getContext().setAuthentication(
-                        new UsernamePasswordAuthenticationToken("agent", null, List.of()));
-                filterChain.doFilter(request, response);
-            } else {
-                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                response.setContentType("application/json");
-                response.getWriter().write("{\"error\":\"Invalid or missing API key\"}");
-            }
-        }
-    }
 }

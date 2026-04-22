@@ -3,56 +3,64 @@
 # ============================================
 # Watchtower Agent
 # ============================================
-# 사용법:
-#   1) 아래 [설정] 섹션의 값을 이 서버에 맞게 수정
-#   2) 설치:  sudo ./watchtower-agent.sh install
-#   3) 확인:  sudo systemctl status watchtower-agent
+# 설치 전에 /etc/watchtower-agent.env 를 먼저 만들어야 합니다 (install 시 템플릿
+# 생성). 시크릿은 이 파일(chmod 600)에서만 읽고, 스크립트에는 평문으로 두지
+# 않습니다.
 #
-#   수동 실행 (디버깅):  ./watchtower-agent.sh run
+# 사용법:
+#   1) sudo ./watchtower-agent.sh install     # 템플릿 env 생성
+#   2) sudo vi /etc/watchtower-agent.env      # 값 채우기
+#   3) sudo systemctl restart watchtower-agent
+#   4) 로그: journalctl -u watchtower-agent -f
+#
+#   수동 실행 (디버깅):  sudo ./watchtower-agent.sh run
 # ============================================
 
-# =========== [설정] 서버마다 수정 ===========
-# 중앙 서버 주소 (HTTPS 권장). 예: https://watchtower.example.com
-WATCHTOWER_URL="https://<YOUR_CENTRAL_URL>"
-HOST_ID="server-a"                                # 호스트 식별자 (영숫자/._- , 유일)
-DISPLAY_NAME="Server A"                           # 대시보드 표시 이름
-# 중앙 서버의 WATCHTOWER_AGENT_API_KEY 환경변수와 동일한 값으로 설정.
-# 생성 예:  openssl rand -hex 32
-API_KEY="<YOUR_AGENT_API_KEY>"
-WATCH_PROCS="java,python,node"                    # 감시할 프로세스 (콤마 구분)
-INTERVAL=5                                        # 수집 주기(초)
-AGENT_PORT=19090                                  # pull fallback 포트
+# =========== [기본값 / 수집 설정] ==========
+# 시크릿/접속정보는 아래 ENV_FILE 에서 로드. 수집 파라미터만 여기 유지.
+WATCH_PROCS_DEFAULT="java,python,node"
+INTERVAL_DEFAULT=5
+AGENT_PORT_DEFAULT=19090
+IGNORE_PATH_REGEX_DEFAULT="^/api/v4/jobs/request|^/api/v4/runners|^/-/metrics|^/health|^/healthz|^/ping|/info/refs|/git-upload-pack|/git-receive-pack"
+ACCESS_LOGS_DEFAULT="/var/log/nginx/access.log"
+CERT_PATHS_DEFAULT="auto"
+CERT_CHECK_INTERVAL_DEFAULT=300
+SLOW_QUERY_LOG_DEFAULT=""
+SLOW_QUERY_MAX_PER_CYCLE_DEFAULT=100
 
-# --- 액세스 로그 (XLog / API 호출 추적) ---
-# 콤마 구분 경로 (nginx combined format 권장, request_time 포함 시 응답시간도 기록)
-# 예: "/var/log/nginx/access.log,/var/log/apache2/access.log"
-# 비워두면 XLog 수집 안 함.
-ACCESS_LOGS="/var/log/nginx/access.log"
-
-# 경로 제외 패턴 (awk 확장 정규식). 매칭되는 요청은 수집에서 제외.
-# 기본: GitLab Runner 폴링, health check, metrics scrape, git 프로토콜 경로
-IGNORE_PATH_REGEX="^/api/v4/jobs/request|^/api/v4/runners|^/-/metrics|^/health|^/healthz|^/ping|/info/refs|/git-upload-pack|/git-receive-pack"
-
-# --- SSL 인증서 만료 추적 ---
-# "auto": /etc/letsencrypt/live/*/fullchain.pem 자동 탐색
-# "":     비활성
-# 경로 목록 (콤마 구분): "/etc/ssl/certs/foo.pem,/etc/ssl/certs/bar.pem"
-CERT_PATHS="auto"
-CERT_CHECK_INTERVAL=300      # 검사 주기 (초). 기본 5분.
-
-# --- MariaDB/MySQL 슬로우 쿼리 로그 ---
-# 경로를 지정하면 슬로우 쿼리도 수집합니다. 비워두면 비활성.
-# MariaDB 설정 예: [mysqld] slow_query_log=1 / long_query_time=0.5 /
-#                  slow_query_log_file=/var/log/mysql/mariadb-slow.log
-# 에이전트 실행 유저에게 로그 파일 읽기 권한이 필요합니다.
-SLOW_QUERY_LOG=""
-SLOW_QUERY_MAX_PER_CYCLE=100
-# ============================================
+# 큐/타임아웃 상수
+QUEUE_MAX_FILES=200              # 최대 보관 파일 수 (초과 시 오래된 것부터 삭제)
+QUEUE_DRAIN_PER_TICK=20          # 한 틱에 재전송 시도 수
+SEND_CONNECT_TIMEOUT=3
+SEND_MAX_TIME=5
 
 INSTALL_DIR="/opt/watchtower-agent"
 SERVICE_FILE="/etc/systemd/system/watchtower-agent.service"
+ENV_FILE="/etc/watchtower-agent.env"
 STATE_DIR="/var/lib/watchtower-agent"
 OFFSET_DIR="$STATE_DIR/offsets"
+QUEUE_DIR="$STATE_DIR/queue"
+# ============================================
+
+load_env_file() {
+    if [ -r "$ENV_FILE" ]; then
+        set -a
+        # shellcheck disable=SC1090
+        . "$ENV_FILE"
+        set +a
+    fi
+
+    # Defaults for non-secret settings
+    WATCH_PROCS="${WATCH_PROCS:-$WATCH_PROCS_DEFAULT}"
+    INTERVAL="${INTERVAL:-$INTERVAL_DEFAULT}"
+    AGENT_PORT="${AGENT_PORT:-$AGENT_PORT_DEFAULT}"
+    IGNORE_PATH_REGEX="${IGNORE_PATH_REGEX:-$IGNORE_PATH_REGEX_DEFAULT}"
+    ACCESS_LOGS="${ACCESS_LOGS:-$ACCESS_LOGS_DEFAULT}"
+    CERT_PATHS="${CERT_PATHS:-$CERT_PATHS_DEFAULT}"
+    CERT_CHECK_INTERVAL="${CERT_CHECK_INTERVAL:-$CERT_CHECK_INTERVAL_DEFAULT}"
+    SLOW_QUERY_LOG="${SLOW_QUERY_LOG:-$SLOW_QUERY_LOG_DEFAULT}"
+    SLOW_QUERY_MAX_PER_CYCLE="${SLOW_QUERY_MAX_PER_CYCLE:-$SLOW_QUERY_MAX_PER_CYCLE_DEFAULT}"
+}
 
 # ============================================
 # Install 모드
@@ -62,36 +70,71 @@ cmd_install() {
         echo "install 은 root 권한이 필요합니다. sudo 로 실행하세요."
         exit 1
     fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "openssl 이 필요합니다 (HMAC 서명용). 설치 후 다시 시도하세요."
+        exit 1
+    fi
 
     local SELF_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
-    echo "==> Installing watchtower-agent..."
-    echo "    URL      : ${WATCHTOWER_URL}"
-    echo "    HOST_ID  : ${HOST_ID}"
-    echo "    DISPLAY  : ${DISPLAY_NAME}"
-    echo "    PROCS    : ${WATCH_PROCS}"
-    echo "    LOGS     : ${ACCESS_LOGS:-<none>}"
-    echo ""
-
-    mkdir -p "$INSTALL_DIR" "$STATE_DIR" "$OFFSET_DIR"
+    mkdir -p "$INSTALL_DIR" "$STATE_DIR" "$OFFSET_DIR" "$QUEUE_DIR"
+    chmod 750 "$STATE_DIR"
     cp "$SELF_PATH" "$INSTALL_DIR/watchtower-agent.sh"
     chmod +x "$INSTALL_DIR/watchtower-agent.sh"
 
-    cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=Watchtower Metrics Agent
-After=network.target
+    if [ ! -f "$ENV_FILE" ]; then
+        umask 077
+        cat > "$ENV_FILE" <<'ENVEOF'
+# /etc/watchtower-agent.env
+#
+# 아래 값을 서버에 맞게 채우세요. chmod 600 (root 전용).
+# systemd 가 이 파일을 EnvironmentFile 로 읽어서 에이전트에 주입합니다.
 
-[Service]
-Type=simple
-ExecStart=${INSTALL_DIR}/watchtower-agent.sh run
-Restart=always
-RestartSec=5
+# --- 필수 ---
+WATCHTOWER_URL="https://<YOUR_CENTRAL_URL>"
+HOST_ID="server-a"
+DISPLAY_NAME="Server A"
+# HMAC 시크릿 (중앙 서버 application.yml 의 watchtower.security.agents[].hmac-secret 와 동일)
+# 생성 예:  openssl rand -hex 32
+HMAC_SECRET="<FILL_WITH_openssl_rand_hex_32>"
 
-[Install]
-WantedBy=multi-user.target
-EOF
+# --- 선택: 레거시 싱글 API 키 모드 (HMAC_SECRET 가 비어있을 때만 사용) ---
+# 중앙 서버 watchtower.security.allow-legacy-api-key=true 일 때만 동작.
+# 운영에서는 비워두고 HMAC 사용 권장.
+API_KEY=""
 
+# --- 수집 파라미터 (선택, 기본값 사용하려면 주석) ---
+# WATCH_PROCS="java,python,node"
+# INTERVAL=5
+# ACCESS_LOGS="/var/log/nginx/access.log"
+# CERT_PATHS="auto"
+# SLOW_QUERY_LOG=""
+ENVEOF
+        chmod 600 "$ENV_FILE"
+        echo "==> Created template $ENV_FILE (chmod 600)"
+        echo "==> 값 채운 뒤 'sudo systemctl restart watchtower-agent' 하세요."
+    else
+        echo "==> $ENV_FILE already exists — leaving untouched."
+    fi
+
+    if ! validate_env_for_install; then
+        echo ""
+        echo "설정이 불완전합니다. $ENV_FILE 을 수정한 뒤 다시 실행하세요."
+        echo "systemd unit 은 생성/활성화되지만, 유효값 채우기 전까지는 재시작하지 않습니다."
+        write_service_unit
+        systemctl daemon-reload
+        systemctl enable watchtower-agent >/dev/null 2>&1
+        exit 2
+    fi
+
+    echo "==> Installing..."
+    echo "    URL      : ${WATCHTOWER_URL}"
+    echo "    HOST_ID  : ${HOST_ID}"
+    echo "    DISPLAY  : ${DISPLAY_NAME}"
+    echo "    Auth     : $( [ -n "$HMAC_SECRET" ] && echo HMAC || echo 'legacy API key' )"
+    echo ""
+
+    write_service_unit
     systemctl daemon-reload
     systemctl enable watchtower-agent
     systemctl restart watchtower-agent
@@ -100,15 +143,72 @@ EOF
     systemctl status watchtower-agent --no-pager
 }
 
+write_service_unit() {
+    cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Watchtower Metrics Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-${ENV_FILE}
+ExecStart=${INSTALL_DIR}/watchtower-agent.sh run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+validate_env_for_install() {
+    load_env_file
+    local ok=true
+
+    if [ -z "$WATCHTOWER_URL" ] || [[ "$WATCHTOWER_URL" == *"<YOUR_CENTRAL_URL>"* ]]; then
+        echo "  [!] WATCHTOWER_URL 미설정 / placeholder"; ok=false
+    fi
+    if [ -z "$HOST_ID" ]; then
+        echo "  [!] HOST_ID 비어있음"; ok=false
+    elif ! [[ "$HOST_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "  [!] HOST_ID 는 영숫자/./_/- 만 허용"; ok=false
+    fi
+    if [ -z "$HMAC_SECRET" ] && [ -z "$API_KEY" ]; then
+        echo "  [!] HMAC_SECRET 또는 API_KEY 중 하나는 필요"; ok=false
+    fi
+    if [ -n "$HMAC_SECRET" ] && [[ "$HMAC_SECRET" == *"<FILL_WITH_openssl_rand_hex_32>"* ]]; then
+        echo "  [!] HMAC_SECRET 이 placeholder"; ok=false
+    fi
+    if [ -n "$HMAC_SECRET" ] && [ ${#HMAC_SECRET} -lt 32 ]; then
+        echo "  [!] HMAC_SECRET 길이 부족 (>=32 문자 필요)"; ok=false
+    fi
+    $ok
+}
+
 # ============================================
 # Run 모드 (수집 & Push 루프)
 # ============================================
 cmd_run() {
-    mkdir -p "$STATE_DIR" "$OFFSET_DIR" 2>/dev/null
+    load_env_file
+
+    if [ -z "$WATCHTOWER_URL" ] || [[ "$WATCHTOWER_URL" == *"<YOUR_CENTRAL_URL>"* ]]; then
+        echo "[FATAL] WATCHTOWER_URL not configured — check $ENV_FILE"; exit 2
+    fi
+    if [ -z "$HOST_ID" ]; then
+        echo "[FATAL] HOST_ID not configured — check $ENV_FILE"; exit 2
+    fi
+    if [ -z "$HMAC_SECRET" ] && [ -z "$API_KEY" ]; then
+        echo "[FATAL] need either HMAC_SECRET or API_KEY — check $ENV_FILE"; exit 2
+    fi
+    if [ -n "$HMAC_SECRET" ] && ! command -v openssl >/dev/null 2>&1; then
+        echo "[FATAL] openssl required for HMAC signing"; exit 2
+    fi
+
+    mkdir -p "$STATE_DIR" "$OFFSET_DIR" "$QUEUE_DIR" 2>/dev/null
 
     local LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
     local AGENT_URL="http://${LOCAL_IP}:${AGENT_PORT}"
-    local REPORT_URL="${WATCHTOWER_URL}/api/agent/report"
+    local REPORT_URL="${WATCHTOWER_URL%/}/api/agent/report"
 
     echo "============================================"
     echo " Watchtower Agent"
@@ -116,28 +216,31 @@ cmd_run() {
     echo " Display    : ${DISPLAY_NAME}"
     echo " Target     : ${REPORT_URL}"
     echo " Interval   : ${INTERVAL}s"
+    echo " Auth       : $( [ -n "$HMAC_SECRET" ] && echo HMAC || echo 'legacy API key' )"
     echo " Watch Procs: ${WATCH_PROCS}"
     echo " Access Logs: ${ACCESS_LOGS:-<none>}"
     echo "============================================"
 
     while true; do
-        local host_json
-        local apps_json
-        local reqs_json
-        local certs_json
-        local slow_json
+        drain_queue "$REPORT_URL"
+
+        local host_json apps_json reqs_json certs_json slow_json
         host_json=$(collect_host)
         apps_json=$(collect_apps)
         reqs_json=$(collect_requests)
         certs_json=$(collect_certs)
         slow_json=$(collect_slow_queries)
-        send_report "$AGENT_URL" "$REPORT_URL" "$host_json" "$apps_json" "$reqs_json" "$certs_json" "$slow_json"
+
+        local payload
+        payload=$(build_payload "$AGENT_URL" "$host_json" "$apps_json" "$reqs_json" "$certs_json" "$slow_json")
+        send_payload "$REPORT_URL" "$payload" || enqueue_payload "$payload"
+
         sleep "$INTERVAL"
     done
 }
 
 # ============================================
-# 수집 함수
+# 수집 함수 (기존과 동일)
 # ============================================
 collect_host() {
     local hostname=$(hostname)
@@ -230,7 +333,6 @@ collect_host() {
     fi
     ports_json+="]"
 
-    # df -T 출력: Filesystem Type 1K-blocks Used Available Use% Mounted-on
     local disks_json="["
     local first=true
     while IFS= read -r line; do
@@ -239,7 +341,6 @@ collect_host() {
         local used_kb=$(echo "$line" | awk '{print $4}')
         local avail_kb=$(echo "$line" | awk '{print $5}')
         local mount=$(echo "$line" | awk '{print $7}')
-        # 숫자가 아니면 skip (헤더 잔여물/깨진 라인 방어)
         [[ ! "$total_kb" =~ ^[0-9]+$ ]] && continue
         [ "$first" = true ] && first=false || disks_json+=","
         disks_json+="{\"mount\":\"${mount}\",\"fsType\":\"${fstype}\","
@@ -380,18 +481,14 @@ collect_requests() {
                     if (method !~ /^[A-Z]+$/) next
                     if (status < 100 || status > 599) next
 
-                    # 프록시 스캔 / 비정상 메서드 제외 (CONNECT, TRACE, OPTIONS probe 등)
                     if (method == "CONNECT" || method == "TRACE") next
 
-                    # host:port 형태 경로 (오픈 프록시 스캔) 제외
                     if (path_only ~ /^[a-zA-Z0-9.-]+:[0-9]+$/) next
 
-                    # 정적 리소스 제외 (이미지/CSS/JS/폰트/미디어/소스맵)
                     path_only = path
                     sub(/\?.*$/, "", path_only)
                     if (path_only ~ /\.(png|jpe?g|gif|svg|ico|webp|bmp|css|js|mjs|map|woff2?|ttf|otf|eot|mp4|mp3|webm|wav|ogg|pdf|txt)$/) next
 
-                    # 사용자 정의 제외 패턴
                     if (ignore_re != "" && path_only ~ ignore_re) next
 
                     printf "{\"timestamp\":%d,\"method\":\"%s\",\"path\":\"%s\",\"status\":%d,\"elapsedMs\":%d,\"bytes\":%d,\"remoteIp\":\"%s\",\"source\":\"%s\"}\n", now_ms, method, json_escape(path), status, elapsed_ms, bytes, ip, src
@@ -423,7 +520,6 @@ collect_certs() {
     local last=0
     [ -f "$ts_file" ] && last=$(cat "$ts_file" 2>/dev/null || echo 0)
 
-    # 캐시 유효 시 그대로 사용
     if [ -f "$cache_file" ] && [ $((now - last)) -lt $CERT_CHECK_INTERVAL ]; then
         cat "$cache_file"
         return
@@ -609,16 +705,18 @@ collect_slow_queries() {
     echo "$out"
 }
 
-send_report() {
+# ============================================
+# Payload build / send / queue
+# ============================================
+build_payload() {
     local agent_url="$1"
-    local report_url="$2"
-    local host_json="$3"
-    local apps_json="$4"
-    local reqs_json="${5:-[]}"
-    local certs_json="${6:-[]}"
-    local slow_json="${7:-[]}"
+    local host_json="$2"
+    local apps_json="$3"
+    local reqs_json="${4:-[]}"
+    local certs_json="${5:-[]}"
+    local slow_json="${6:-[]}"
 
-    local payload=$(cat <<PAYLOADEOF
+    cat <<PAYLOADEOF
 {
   "hostId": "${HOST_ID}",
   "displayName": "${DISPLAY_NAME}",
@@ -630,27 +728,90 @@ send_report() {
   "slowQueries": ${slow_json}
 }
 PAYLOADEOF
-)
+}
 
-    local curl_args=(-s -o /dev/null -w "%{http_code}" \
-        -X POST "${report_url}" \
-        -H "Content-Type: application/json" \
-        -d "${payload}" \
-        --connect-timeout 3 \
-        --max-time 5)
+# HMAC-SHA256 over: agentId\ntimestamp\nbody  (with secret).  Returns lowercase hex.
+hmac_hex() {
+    local secret="$1"
+    # payload read from stdin
+    openssl dgst -sha256 -hmac "$secret" 2>/dev/null \
+        | sed -E 's/^.*= *//' \
+        | tr -d '[:space:]'
+}
 
-    if [ -n "$API_KEY" ]; then
-        curl_args+=(-H "X-API-Key: ${API_KEY}")
+# send_payload REPORT_URL PAYLOAD
+# returns 0 on HTTP 200, non-zero otherwise
+send_payload() {
+    local report_url="$1"
+    local payload="$2"
+    local headers=(-H "Content-Type: application/json")
+
+    if [ -n "$HMAC_SECRET" ]; then
+        local ts
+        ts=$(date +%s)
+        local sig
+        sig=$(printf '%s\n%s\n%s' "$HOST_ID" "$ts" "$payload" | hmac_hex "$HMAC_SECRET")
+        headers+=(-H "X-Agent-Id: ${HOST_ID}" -H "X-Timestamp: ${ts}" -H "X-Signature: ${sig}")
+    elif [ -n "$API_KEY" ]; then
+        headers+=(-H "X-API-Key: ${API_KEY}")
     fi
 
     local http_code
-    http_code=$(curl "${curl_args[@]}" 2>/dev/null)
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "${report_url}" \
+        "${headers[@]}" \
+        --data-binary "${payload}" \
+        --connect-timeout "$SEND_CONNECT_TIMEOUT" \
+        --max-time "$SEND_MAX_TIME" 2>/dev/null)
 
     if [ "$http_code" = "200" ]; then
         echo "[$(date '+%H:%M:%S')] push OK -> ${report_url}"
+        return 0
     else
         echo "[$(date '+%H:%M:%S')] push FAIL (HTTP ${http_code}) -> ${report_url}"
+        return 1
     fi
+}
+
+enqueue_payload() {
+    local payload="$1"
+    mkdir -p "$QUEUE_DIR" 2>/dev/null || return 0
+
+    # Evict oldest if over cap
+    local count
+    count=$(find "$QUEUE_DIR" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l)
+    if [ "$count" -ge "$QUEUE_MAX_FILES" ]; then
+        local to_remove=$((count - QUEUE_MAX_FILES + 1))
+        find "$QUEUE_DIR" -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -n | head -n "$to_remove" | awk '{$1=""; sub(/^ /,""); print}' \
+            | while IFS= read -r f; do [ -n "$f" ] && rm -f "$f"; done
+    fi
+
+    local fname="$QUEUE_DIR/$(date +%s%N)-$$.json"
+    printf '%s' "$payload" > "$fname" 2>/dev/null
+}
+
+drain_queue() {
+    local report_url="$1"
+    [ -d "$QUEUE_DIR" ] || return 0
+    local files
+    files=$(find "$QUEUE_DIR" -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -n | head -n "$QUEUE_DRAIN_PER_TICK" | awk '{$1=""; sub(/^ /,""); print}')
+    [ -z "$files" ] && return 0
+
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        [ -f "$f" ] || continue
+        local payload
+        payload=$(cat "$f" 2>/dev/null)
+        [ -z "$payload" ] && { rm -f "$f"; continue; }
+        if send_payload "$report_url" "$payload"; then
+            rm -f "$f"
+        else
+            # Stop draining this tick — central still unhealthy
+            break
+        fi
+    done <<< "$files"
 }
 
 # ============================================
@@ -662,7 +823,7 @@ case "$CMD" in
     install)  cmd_install ;;
     run)      cmd_run ;;
     -h|--help|help)
-        sed -n '3,14p' "$0"
+        sed -n '3,20p' "$0"
         ;;
     *)
         echo "Usage: $0 {install|run}"

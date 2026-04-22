@@ -1,9 +1,11 @@
 package com.watchtower.collector;
 
+import com.watchtower.config.AgentSignatureFilter;
 import com.watchtower.domain.HostSnapshot;
 import com.watchtower.registry.HostRegistry;
 import com.watchtower.store.MetricsStore;
 import com.watchtower.websocket.MetricsPublisher;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -31,10 +33,19 @@ public class AgentReceiver {
     private final MetricsPublisher publisher;
 
     @PostMapping("/report")
-    public ResponseEntity<Void> report(@Valid @RequestBody AgentReport report) {
+    public ResponseEntity<Void> report(@Valid @RequestBody AgentReport report,
+                                       HttpServletRequest request) {
         String hostId = report.hostId();
         String displayName = report.displayName();
         String agentUrl = report.agentUrl();
+
+        Object authedAgent = request.getAttribute(AgentSignatureFilter.AUTHENTICATED_AGENT_ATTR);
+        if (authedAgent instanceof String authedId
+                && !"legacy".equals(authedId)
+                && !authedId.equals(hostId)) {
+            log.warn("agent {} attempted to report as {}", authedId, hostId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
 
         if (!registry.tryConsume(hostId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();

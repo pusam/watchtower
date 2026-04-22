@@ -15,7 +15,7 @@ MariaDB 슬로우 쿼리, 알람(Slack 통지)까지 한 화면에서.
 ### 1) 시크릿 생성
 
 ```bash
-# 에이전트 API 키 (32바이트 hex)
+# 에이전트별 HMAC 시크릿 — 서버마다 새로 생성
 openssl rand -hex 32
 
 # 대시보드 비밀번호 (20자)
@@ -28,20 +28,42 @@ openssl rand -base64 20
 
 ```bash
 export WATCHTOWER_DASHBOARD_USER="admin"
-export WATCHTOWER_DASHBOARD_PASS="<위에서 생성한 비밀번호>"
-export WATCHTOWER_AGENT_API_KEY="<위에서 생성한 API 키>"
-export WATCHTOWER_ALLOWED_ORIGIN="https://your-dashboard.example.com"   # CORS 오리진
+export WATCHTOWER_DASHBOARD_PASS="<대시보드 비밀번호>"
+export WATCHTOWER_ALLOWED_ORIGIN="https://your-dashboard.example.com"
 export WATCHTOWER_SLACK_WEBHOOK="https://hooks.slack.com/services/..."  # 선택
+
+# 에이전트별 HMAC 시크릿을 개별 env 로 주입 (application.yml 에서 ${AGENT_SECRET_SERVER_A} 등으로 참조)
+export AGENT_SECRET_SERVER_A="<openssl rand -hex 32 출력>"
+export AGENT_SECRET_SERVER_B="<openssl rand -hex 32 출력>"
+
+# 운영에서는 레거시 싱글 키 끄기 (모든 에이전트 HMAC 이관 완료 후)
+export WATCHTOWER_ALLOW_LEGACY_API_KEY=false
 ```
 
-### 3) 에이전트 스크립트 상단 4개 변수 교체
+그리고 `application.yml` (또는 오버라이드) 의 `watchtower.security.agents` 에 에이전트 등록:
+
+```yaml
+watchtower:
+  security:
+    agents:
+      - id: server-a
+        hmac-secret: ${AGENT_SECRET_SERVER_A:}
+      - id: server-b
+        hmac-secret: ${AGENT_SECRET_SERVER_B:}
+```
+
+### 3) 대상 서버별 에이전트 설정
+
+각 서버에서 `/etc/watchtower-agent.env` 를 생성 (install 실행 시 템플릿 자동 생성):
 
 ```bash
 WATCHTOWER_URL="https://your-dashboard.example.com"
 HOST_ID="server-a"
 DISPLAY_NAME="Server A"
-API_KEY="<위에서 생성한 API 키 — 중앙 서버와 동일해야 함>"
+HMAC_SECRET="<위 AGENT_SECRET_SERVER_A 와 동일한 값>"
 ```
+
+`HMAC_SECRET` 는 **서버마다 달라야 합니다.** 중앙 서버의 `agents[].hmac-secret` 와 동일 값을 사용.
 
 ---
 
@@ -70,18 +92,48 @@ sudo ./watchtower-agent.sh install
 
 ## 에이전트 설치 가이드
 
-### 필수 수정 항목 (파일 상단)
+### 1) 설치 (template env 생성)
 
 ```bash
-WATCHTOWER_URL="https://your-central.example.com"  # 중앙 서버 주소 (HTTPS 권장)
-HOST_ID="server-a"                                  # 호스트 식별자 (영숫자/._- , 유일)
-DISPLAY_NAME="Fulfillment Server A"                 # 대시보드 표시 이름
-API_KEY="<YOUR_AGENT_API_KEY>"                      # 중앙 서버의 WATCHTOWER_AGENT_API_KEY 와 동일
-WATCH_PROCS="java,python,node"                      # 감시할 프로세스 이름 (콤마 구분)
-INTERVAL=5                                          # 수집 주기(초)
+sudo ./watchtower-agent.sh install
 ```
 
-### 선택 기능 (필요한 것만 설정)
+최초 실행 시 `/etc/watchtower-agent.env` 에 템플릿을 만들고(chmod 600) 종료합니다. systemd unit 도 함께 생성.
+
+### 2) env 파일 편집
+
+```bash
+sudo vi /etc/watchtower-agent.env
+```
+
+필수 항목:
+```bash
+WATCHTOWER_URL="https://your-central.example.com"   # 중앙 서버 주소
+HOST_ID="server-a"                                   # 호스트 ID (영숫자/._-, 유일)
+DISPLAY_NAME="Server A"
+HMAC_SECRET="<openssl rand -hex 32 로 생성한 값>"    # 중앙 서버 agents[].hmac-secret 와 동일
+```
+
+선택 항목 (기본값 쓰려면 주석):
+```bash
+# WATCH_PROCS="java,python,node"
+# INTERVAL=5
+# ACCESS_LOGS="/var/log/nginx/access.log"
+# CERT_PATHS="auto"
+# SLOW_QUERY_LOG="/var/log/mysql/mariadb-slow.log"
+```
+
+### 3) 서비스 시작
+
+```bash
+sudo systemctl restart watchtower-agent
+sudo systemctl status watchtower-agent
+journalctl -u watchtower-agent -f
+```
+
+로그에 `push OK -> ...` 가 뜨면 성공.
+
+### 선택 기능
 
 | 기능 | 변수 | 비고 |
 |------|------|------|
@@ -90,13 +142,9 @@ INTERVAL=5                                          # 수집 주기(초)
 | SSL 인증서 | `CERT_PATHS` | `auto` = Let's Encrypt 자동 탐색, 또는 경로 목록 |
 | MariaDB 슬로우쿼리 | `SLOW_QUERY_LOG` | 슬로우 로그 파일 경로 |
 
-### 설치 & 확인
+### 오프라인 재시도 큐
 
-```bash
-sudo ./watchtower-agent.sh install
-sudo systemctl status watchtower-agent
-journalctl -u watchtower-agent -f
-```
+중앙 서버가 일시적으로 다운되면 에이전트는 payload 를 `/var/lib/watchtower-agent/queue/` 에 파일로 저장하고, 다음 틱에서 오래된 것부터 재전송합니다. 큐는 최대 200개로 캡(초과 시 가장 오래된 것부터 삭제).
 
 ### 제거
 
@@ -206,13 +254,42 @@ export WATCHTOWER_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
 
 ## 보안
 
-| 항목 | 환경변수 |
-|------|---------|
+### 인증 모델
+
+**에이전트 → 중앙 서버**: 에이전트별 HMAC-SHA256 서명 (권장) 또는 레거시 싱글 API 키.
+
+HMAC 모드에서는 매 요청마다 다음 세 헤더가 필요:
+- `X-Agent-Id`: 에이전트 ID
+- `X-Timestamp`: 현재 시각(초, epoch)
+- `X-Signature`: `HMAC-SHA256(agentId + "\n" + timestamp + "\n" + body, secret)` 의 소문자 hex
+
+서버는 timestamp 스큐 ±300초 초과 시 거부(리플레이 방어), body/agentId 위변조 시 서명 검증 실패로 거부. 추가로 body 안의 `hostId` 가 인증된 `X-Agent-Id` 와 다르면 403(에이전트 간 사칭 방지).
+
+### 환경변수 / 설정
+
+| 항목 | 위치 |
+|------|-----|
 | 대시보드 로그인 | `WATCHTOWER_DASHBOARD_USER`, `WATCHTOWER_DASHBOARD_PASS` |
-| 에이전트 → 서버 인증 | `WATCHTOWER_AGENT_API_KEY` (에이전트 `API_KEY` 와 일치) |
+| 에이전트 HMAC 시크릿 | `application.yml` 의 `watchtower.security.agents[].hmac-secret` (env 로 주입 권장) |
+| 에이전트 측 시크릿 | 각 서버 `/etc/watchtower-agent.env` 의 `HMAC_SECRET` (chmod 600) |
+| 레거시 싱글 키 허용 여부 | `WATCHTOWER_ALLOW_LEGACY_API_KEY` (운영에서 `false` 권장) |
+| 시간 스큐 허용 범위 | `watchtower.security.agent-max-clock-skew-seconds` (기본 300) |
 | CORS 허용 오리진 | `WATCHTOWER_ALLOWED_ORIGIN` |
 
-운영 환경에서는 반드시 **기본값 변경 + HTTPS(리버스 프록시/ngrok)** 적용.
+### 키 로테이션
+
+1. 새 시크릿 생성: `openssl rand -hex 32`
+2. 중앙 서버 `agents[id=server-a].hmac-secret` 를 새 값으로 교체 → 재시작
+3. 에이전트 `/etc/watchtower-agent.env` 도 새 값으로 교체 → `systemctl restart watchtower-agent`
+4. 교체 중 수초간 push 가 401 로 실패할 수 있으나, 에이전트 로컬 큐로 버퍼링되므로 유실되지 않음
+
+### 레거시 모드에서 HMAC 로 이관
+
+1. 각 에이전트에 새 `HMAC_SECRET` 발급, 중앙 서버 `agents[]` 에 등록
+2. 에이전트 env 에서 `API_KEY` 주석, `HMAC_SECRET` 기입 → 재시작
+3. 모든 에이전트 이관 완료 후 중앙 서버 `WATCHTOWER_ALLOW_LEGACY_API_KEY=false` → 재시작
+
+운영 환경에서는 반드시 **기본값 변경 + HTTPS(리버스 프록시/ngrok/Cloudflare Tunnel)** 적용.
 
 ---
 

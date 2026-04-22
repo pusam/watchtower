@@ -39,6 +39,15 @@ public class MonitorProperties {
         private List<String> allowedOrigins = List.of("http://localhost:9090");
         private int maxRegistrationsPerMinute = 12;
         private List<DashboardUser> users = new ArrayList<>();
+        private List<AgentCredential> agents = new ArrayList<>();
+        private long agentMaxClockSkewSeconds = 300;
+        private boolean allowLegacyApiKey = true;
+    }
+
+    @Data
+    public static class AgentCredential {
+        private String id;
+        private String hmacSecret;
     }
 
     @Data
