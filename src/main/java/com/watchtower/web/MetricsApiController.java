@@ -7,8 +7,10 @@ import com.watchtower.analytics.SlowQueryStatsService;
 import com.watchtower.domain.AlarmEvent;
 import com.watchtower.domain.EndpointStat;
 import com.watchtower.domain.HostSnapshot;
+import com.watchtower.domain.LogVolumeStatus;
 import com.watchtower.domain.ProbeResult;
 import com.watchtower.domain.SlowQueryStat;
+import com.watchtower.logvolume.LogVolumeMonitor;
 import com.watchtower.persistence.SnapshotRepository;
 import com.watchtower.probe.SyntheticProbeService;
 import com.watchtower.store.MetricsStore;
@@ -43,6 +45,7 @@ public class MetricsApiController {
     private final SlowQueryStatsService slowQueryStats;
     private final SyntheticProbeService probeService;
     private final MaintenanceService maintenanceService;
+    private final LogVolumeMonitor logVolumeMonitor;
     private final ObjectProvider<SnapshotRepository> snapshotRepoProvider;
 
     @GetMapping("/metrics")
@@ -120,6 +123,11 @@ public class MetricsApiController {
     @GetMapping("/probes")
     public List<ProbeResult> probes() {
         return probeService.currentResults();
+    }
+
+    @GetMapping("/log-volumes")
+    public List<LogVolumeStatus> logVolumes() {
+        return logVolumeMonitor.snapshot();
     }
 
     @PostMapping("/alarms/{id}/ack")

@@ -19,6 +19,7 @@ public class MonitorProperties {
     private List<HostTarget> hosts = new ArrayList<>();
     private List<Probe> probes = new ArrayList<>();
     private List<MaintenanceWindow> maintenance = new ArrayList<>();
+    private List<LogVolume> logVolumes = new ArrayList<>();
     private Security security = new Security();
     private Alarms alarms = new Alarms();
     private Persistence persistence = new Persistence();
@@ -56,6 +57,14 @@ public class MonitorProperties {
     }
 
     @Data
+    public static class LogVolume {
+        private String id;
+        private String name;
+        private String path;
+        private long maxBytes;
+    }
+
+    @Data
     public static class Probe {
         private String id;
         private String name;
@@ -90,6 +99,8 @@ public class MonitorProperties {
         private double cpuThresholdPct = 90;
         private double memThresholdPct = 90;
         private double diskThresholdPct = 85;
+        private double logVolumeThresholdPct = 80;
+        private long logVolumeCheckIntervalMs = 60_000L;
         private double errorRateThresholdPct = 5;
         private long errorRateWindowSec = 60;
         private long slowResponseMs = 3000;

@@ -42,6 +42,8 @@ watchtower:
     slow-response-ms: 3000
     cert-days-left-threshold: 14
     host-down-threshold-ms: 30000
+    log-volume-threshold-pct: 80
+    log-volume-check-interval-ms: 60000
   security:
     dashboard-username: ${WATCHTOWER_DASHBOARD_USER:admin}
     dashboard-password: ${WATCHTOWER_DASHBOARD_PASS:}
@@ -59,6 +61,15 @@ watchtower:
     - id: server-b
       name: Fulfillment Server B
       agentUrl: http://192.168.0.11:19090
+  log-volumes: []
+    # - id: app-logs
+    #   name: Application Logs
+    #   path: /var/log/app
+    #   maxBytes: 10737418240   # 10 GiB
+    # - id: watchtower-data
+    #   name: Watchtower Data
+    #   path: ./data
+    #   maxBytes: 1073741824    # 1 GiB
   probes: []
     # - id: api-health
     #   name: API Health

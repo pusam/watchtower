@@ -8,6 +8,7 @@ const state = {
     xlog: [],
     alarmsActive: [],
     alarmsHistory: [],
+    logVolumes: [],
     endpoints: [],
     statusBuckets: [],
     slowQueries: [],
@@ -133,6 +134,81 @@ if (maintBtn) {
             }
         }
     });
+}
+
+// ===== Browser notifications =====
+const NOTIFY_KEY = 'wt.notify.enabled';
+const notifyBtn = document.getElementById('notify-btn');
+const notifyLabel = document.getElementById('notify-label');
+let notifyEnabled = localStorage.getItem(NOTIFY_KEY) === '1';
+const notifiedAlarmIds = new Set();
+
+function refreshNotifyLabel() {
+    if (!notifyBtn) return;
+    const on = notifyEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+    notifyBtn.classList.toggle('active', on);
+    notifyLabel.textContent = on ? '팝업 알림 ON' : '팝업 알림 OFF';
+}
+refreshNotifyLabel();
+
+if (notifyBtn) {
+    notifyBtn.addEventListener('click', async () => {
+        if (typeof Notification === 'undefined') {
+            alert('이 브라우저는 알림을 지원하지 않습니다.');
+            return;
+        }
+        if (notifyEnabled) {
+            notifyEnabled = false;
+            localStorage.setItem(NOTIFY_KEY, '0');
+            refreshNotifyLabel();
+            return;
+        }
+        let perm = Notification.permission;
+        if (perm === 'default') {
+            try { perm = await Notification.requestPermission(); } catch (e) { perm = 'denied'; }
+        }
+        if (perm !== 'granted') {
+            alert('브라우저 알림 권한이 거부되어 있습니다. 브라우저 설정에서 허용해 주세요.');
+            return;
+        }
+        notifyEnabled = true;
+        localStorage.setItem(NOTIFY_KEY, '1');
+        refreshNotifyLabel();
+        try {
+            new Notification('Watchtower 알림 활성화', {
+                body: '주요 알람이 발생하면 팝업으로 표시됩니다.',
+                tag: 'wt-notify-enabled'
+            });
+        } catch (e) { /* ignore */ }
+    });
+}
+
+function severityIcon(sev) {
+    if (sev === 'CRIT') return '🔴';
+    if (sev === 'WARN') return '🟠';
+    return '🔵';
+}
+
+function maybeNotifyAlarm(alarm) {
+    if (!notifyEnabled) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (!alarm || alarm.state !== 'FIRING' || alarm.acknowledged) return;
+    if (alarm.severity === 'INFO') return;
+    if (notifiedAlarmIds.has(alarm.id)) return;
+    notifiedAlarmIds.add(alarm.id);
+    if (notifiedAlarmIds.size > 500) {
+        const first = notifiedAlarmIds.values().next().value;
+        notifiedAlarmIds.delete(first);
+    }
+    try {
+        const title = `${severityIcon(alarm.severity)} ${alarm.hostName || alarm.hostId || ''} · ${alarm.type || ''}`;
+        const n = new Notification(title, {
+            body: alarm.message || '',
+            tag: 'wt-alarm-' + alarm.id,
+            requireInteraction: alarm.severity === 'CRIT'
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+    } catch (e) { /* ignore */ }
 }
 
 // ===== Sidebar (host list) =====
@@ -682,6 +758,54 @@ function renderDisks() {
     }).join('');
 }
 
+// ===== Log volumes =====
+function renderLogVolumes() {
+    const card = document.getElementById('logvol-card');
+    const list = document.getElementById('logvol-list');
+    const sub = document.getElementById('logvol-sub');
+    const rows = state.logVolumes || [];
+    if (!rows.length) {
+        card.style.display = 'none';
+        list.innerHTML = '';
+        return;
+    }
+    card.style.display = '';
+    sub.textContent = `${rows.length}개 경로`;
+    list.innerHTML = rows.map(v => {
+        const pct = v.maxBytes > 0 ? (v.usedBytes * 100 / v.maxBytes) : 0;
+        const cls = severityClass(pct);
+        const name = v.name || v.id || '';
+        const errBlock = v.error
+            ? `<div class="disk-err" style="color:#f87171;font-size:11px;margin-top:4px">${escapeHtml(v.error)}</div>`
+            : '';
+        return `
+            <div class="disk-row">
+                <div class="disk-head">
+                    <div class="disk-left">
+                        <span class="disk-mount">${escapeHtml(name)}</span>
+                        <span class="disk-fs mono" title="${escapeHtml(v.path || '')}">${escapeHtml(v.path || '')}</span>
+                    </div>
+                    <div class="disk-right">
+                        <span class="mono">${fmtBytes(v.usedBytes)} / ${fmtBytes(v.maxBytes)}</span>
+                        <span class="disk-pct ${cls}">${pct.toFixed(1)}%</span>
+                    </div>
+                </div>
+                <div class="disk-bar-bg"><div class="disk-bar ${cls}" style="width:${Math.min(100, pct).toFixed(1)}%"></div></div>
+                ${errBlock}
+            </div>`;
+    }).join('');
+}
+
+async function fetchLogVolumes() {
+    try {
+        const r = await fetch('/api/log-volumes');
+        state.logVolumes = await r.json().catch(() => []);
+        renderLogVolumes();
+    } catch (e) {
+        console.warn('log-volumes fetch failed', e);
+    }
+}
+
 // ===== Certs =====
 function renderCerts() {
     const list = document.getElementById('certs-list');
@@ -983,6 +1107,7 @@ function renderAll() {
     rebuildCharts();
     renderProcs();
     renderDisks();
+    renderLogVolumes();
     renderCerts();
     renderNetPorts();
     renderEndpoints();
@@ -1032,7 +1157,7 @@ async function loadInitial() {
         state.xlog = (xlogList || []).slice().sort((a, b) => a.timestamp - b.timestamp).slice(-MAX_XLOG);
         state.alarmsActive = alarms.active || [];
         state.alarmsHistory = alarms.history || [];
-        await Promise.all([fetchEndpoints(), fetchStatusDistribution(), fetchSlowQueries(), fetchProbes(), fetchHistoryForScope()]);
+        await Promise.all([fetchEndpoints(), fetchStatusDistribution(), fetchSlowQueries(), fetchProbes(), fetchLogVolumes(), fetchHistoryForScope()]);
         renderAll();
     } catch (e) {
         console.warn('Initial load failed:', e);
@@ -1317,6 +1442,10 @@ function connect() {
         setConnection(true);
         stomp.subscribe('/topic/metrics', f => applySnapshot(JSON.parse(f.body)));
         stomp.subscribe('/topic/alarms', f => applyAlarm(JSON.parse(f.body)));
+        stomp.subscribe('/topic/log-volumes', f => {
+            state.logVolumes = JSON.parse(f.body) || [];
+            renderLogVolumes();
+        });
     }, () => {
         setConnection(false);
         setTimeout(connect, 3000);
@@ -1325,9 +1454,11 @@ function connect() {
 
 function applyAlarm(alarm) {
     const idx = state.alarmsActive.findIndex(a => a.id === alarm.id);
+    const isNew = idx < 0;
     if (alarm.state === 'FIRING') {
         if (idx >= 0) state.alarmsActive[idx] = alarm;
         else state.alarmsActive.push(alarm);
+        if (isNew) maybeNotifyAlarm(alarm);
     } else if (alarm.state === 'RESOLVED') {
         if (idx >= 0) state.alarmsActive.splice(idx, 1);
     }
