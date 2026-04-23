@@ -18,7 +18,7 @@ public record AlarmEvent(
         Instant acknowledgedAt,
         String acknowledgedBy
 ) {
-    public enum Type { CPU, MEMORY, DISK, HOST_DOWN, ERROR_RATE, SLOW_RESPONSE, CERT_EXPIRING, ENDPOINT_DOWN, ENDPOINT_SLOW, LOG_VOLUME }
+    public enum Type { CPU, MEMORY, DISK, HOST_DOWN, ERROR_RATE, SLOW_RESPONSE, CERT_EXPIRING, ENDPOINT_DOWN, ENDPOINT_SLOW, LOG_VOLUME, ANOMALY }
     public enum Severity { INFO, WARN, CRIT }
     public enum State { FIRING, RESOLVED }
 

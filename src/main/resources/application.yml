@@ -60,6 +60,18 @@ watchtower:
     host-down-threshold-ms: 30000
     log-volume-threshold-pct: 80
     log-volume-check-interval-ms: 60000
+    # Rolling-baseline anomaly detection. Complements the absolute thresholds above:
+    # fires a WARN when CPU/mem/error-rate drifts >= z-threshold std-devs above the
+    # per-host baseline, even when still under the absolute threshold. Start with
+    # enabled=false and turn on after you've watched a few days of normal traffic.
+    anomaly:
+      enabled: ${WATCHTOWER_ANOMALY_ENABLED:false}
+      window-size: 360          # samples (at 5s poll interval, 360 = 30 min)
+      min-samples: 60           # need at least this many before evaluating
+      z-threshold: 3.5          # std-devs above mean to flag
+      min-cpu-pct: 40           # ignore anomalies below this absolute floor
+      min-mem-pct: 60
+      min-error-rate-pct: 1.0
   security:
     dashboard-username: ${WATCHTOWER_DASHBOARD_USER:admin}
     dashboard-password: ${WATCHTOWER_DASHBOARD_PASS:}

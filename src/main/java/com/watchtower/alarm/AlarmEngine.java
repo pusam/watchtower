@@ -44,6 +44,7 @@ public class AlarmEngine {
     /** recent alarm log (capped) */
     private final java.util.Deque<AlarmEvent> history = new java.util.ArrayDeque<>();
     private static final int HISTORY_MAX = 200;
+    private final AnomalyBaseline anomalyBaseline;
 
     public AlarmEngine(MetricsStore store, MonitorProperties properties,
                        MetricsPublisher publisher, NotificationDispatcher notifier,
@@ -57,6 +58,7 @@ public class AlarmEngine {
         this.endpointStats = endpointStats;
         this.repoProvider = repoProvider;
         this.maintenance = maintenance;
+        this.anomalyBaseline = new AnomalyBaseline(properties.getAlarms().getAnomaly().getWindowSize());
     }
 
     @PostConstruct
@@ -182,6 +184,49 @@ public class AlarmEngine {
         } else {
             resolve(hostId, hostName, AlarmEvent.Type.ERROR_RATE, null);
         }
+
+        evalAnomalies(snap, hostId, hostName, errRate);
+    }
+
+    /**
+     * Feeds the rolling baseline and fires WARN ANOMALY when the current value is
+     * {@code >= zThreshold} std-devs above the mean. Threshold-based alarms above
+     * still fire independently; anomaly alarms catch the "unusual for this host"
+     * band below those absolute thresholds.
+     */
+    private void evalAnomalies(HostSnapshot snap, String hostId, String hostName, double errRate) {
+        MonitorProperties.Anomaly a = properties.getAlarms().getAnomaly();
+        if (!a.isEnabled()) return;
+
+        HostSnapshot.HostInfo h = snap.host();
+        if (h != null) {
+            double cpu = h.cpuUsedPct();
+            anomalyBaseline.record(hostId, "cpu", cpu);
+            checkAnomaly(hostId, hostName, "cpu", cpu, a.getMinCpuPct(), a, "CPU");
+
+            double memPct = h.memTotal() > 0 ? (h.memUsed() * 100.0) / h.memTotal() : 0;
+            anomalyBaseline.record(hostId, "mem", memPct);
+            checkAnomaly(hostId, hostName, "mem", memPct, a.getMinMemPct(), a, "메모리");
+        }
+
+        anomalyBaseline.record(hostId, "errRate", errRate);
+        checkAnomaly(hostId, hostName, "errRate", errRate, a.getMinErrorRatePct(), a, "에러율");
+    }
+
+    private void checkAnomaly(String hostId, String hostName, String metric, double value,
+                              double minValue, MonitorProperties.Anomaly cfg, String label) {
+        if (value < minValue) {
+            resolve(hostId, hostName, AlarmEvent.Type.ANOMALY, metric);
+            return;
+        }
+        double z = anomalyBaseline.zScore(hostId, metric, value, cfg.getMinSamples());
+        if (Double.isNaN(z) || z < cfg.getZThreshold()) {
+            resolve(hostId, hostName, AlarmEvent.Type.ANOMALY, metric);
+            return;
+        }
+        trigger(hostId, hostName, AlarmEvent.Type.ANOMALY, metric, AlarmEvent.Severity.WARN,
+                String.format("%s 이상 징후: 현재 %.1f (기준선 대비 z=%.1fσ)", label, value, z),
+                value, cfg.getZThreshold());
     }
 
     private String key(String hostId, AlarmEvent.Type t, String q) {

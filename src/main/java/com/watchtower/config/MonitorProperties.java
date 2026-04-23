@@ -159,5 +159,24 @@ public class MonitorProperties {
         private long slowResponseMs = 3000;
         private long certDaysLeftThreshold = 14;
         private long hostDownThresholdMs = 30000;
+        private Anomaly anomaly = new Anomaly();
+    }
+
+    /**
+     * Rolling-baseline anomaly detection. Each (host, metric) keeps a sliding window of
+     * recent values; a WARN ANOMALY alarm fires when the current value is more than
+     * {@link #zThreshold} std-devs above the running mean, assuming the window has at
+     * least {@link #minSamples} points and the value is &ge; {@link #minValue}
+     * (so a jump from 1%→10% CPU doesn't page anyone).
+     */
+    @Data
+    public static class Anomaly {
+        private boolean enabled = false;
+        private int windowSize = 360;
+        private int minSamples = 60;
+        private double zThreshold = 3.5;
+        private double minCpuPct = 40.0;
+        private double minMemPct = 60.0;
+        private double minErrorRatePct = 1.0;
     }
 }
