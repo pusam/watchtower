@@ -59,18 +59,11 @@ watchtower:
   security:
     dashboard-username: ${WATCHTOWER_DASHBOARD_USER:admin}
     dashboard-password: ${WATCHTOWER_DASHBOARD_PASS:}
-    # Per-agent HMAC credentials (recommended). Generate secrets with: openssl rand -hex 32
-    # Override via env like WATCHTOWER_SECURITY_AGENTS_0_ID=server-a,
-    # WATCHTOWER_SECURITY_AGENTS_0_HMAC_SECRET=...
-    agents: []
-      # - id: server-a
-      #   hmac-secret: ${AGENT_SECRET_SERVER_A:}
-      #   # Rotation: when issuing a new secret, put the old one here until the
-      #   # agent has migrated. Remove afterwards.
-      #   previous-hmac-secrets:
-      #     - ${AGENT_SECRET_SERVER_A_PREV:}
-      # - id: server-b
-      #   hmac-secret: ${AGENT_SECRET_SERVER_B:}
+    # Per-agent HMAC credentials (recommended). Configure via environment variables:
+    #   WATCHTOWER_SECURITY_AGENTS_0_ID=server-a
+    #   WATCHTOWER_SECURITY_AGENTS_0_HMAC_SECRET=<openssl rand -hex 32>
+    #   WATCHTOWER_SECURITY_AGENTS_0_PREVIOUS_HMAC_SECRETS_0=<old secret during rotation>
+    # (do not define 'agents: []' here — that would override env-supplied values)
     # Legacy single-key fallback. Disable in production after migrating all agents.
     agent-api-key: ${WATCHTOWER_AGENT_API_KEY:}
     allow-legacy-api-key: ${WATCHTOWER_ALLOW_LEGACY_API_KEY:true}

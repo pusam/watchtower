@@ -17,7 +17,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.util.ContentCachingRequestWrapper;
 
 /**
  * Authenticates agent reports via per-agent HMAC-SHA256 signatures.
@@ -82,14 +81,14 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
             response.getWriter().write("{\"error\":\"payload too large\"}");
             return;
         }
-        ContentCachingRequestWrapper wrapped = new ContentCachingRequestWrapper(request);
-        byte[] body = readBoundedBody(wrapped);
+        byte[] body = readBoundedBody(request);
         if (body == null) {
             response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
             response.setContentType("application/json");
             response.getWriter().write("{\"error\":\"payload too large\"}");
             return;
         }
+        HttpServletRequest replayable = new CachedBodyRequestWrapper(request, body);
 
         String agentId = request.getHeader(AGENT_ID_HEADER);
         String timestamp = request.getHeader(TIMESTAMP_HEADER);
@@ -102,7 +101,7 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
                 return;
             }
             authenticate(verified, request);
-            filterChain.doFilter(wrapped, response);
+            filterChain.doFilter(replayable, response);
             return;
         }
 
@@ -113,7 +112,7 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
                     && MessageDigest.isEqual(legacyKeyBytes,
                             provided.getBytes(StandardCharsets.UTF_8))) {
                 authenticate("legacy", request);
-                filterChain.doFilter(wrapped, response);
+                filterChain.doFilter(replayable, response);
                 return;
             }
         }
@@ -186,8 +185,10 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
         response.getWriter().write("{\"error\":\"" + msg + "\"}");
     }
 
-    private static byte[] readBoundedBody(ContentCachingRequestWrapper wrapped) throws IOException {
-        java.io.InputStream in = wrapped.getInputStream();
+    private static byte[] readBoundedBody(HttpServletRequest request) throws IOException {
+        java.io.InputStream in = request.getInputStream();
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(Math.min(
+                MAX_BODY_BYTES, Math.max(1024, (int) Math.min(Integer.MAX_VALUE, request.getContentLengthLong()))));
         byte[] buf = new byte[8192];
         int total = 0;
         while (true) {
@@ -195,7 +196,55 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
             if (n < 0) break;
             total += n;
             if (total > MAX_BODY_BYTES) return null;
+            out.write(buf, 0, n);
         }
-        return wrapped.getContentAsByteArray();
+        return out.toByteArray();
+    }
+
+    /**
+     * Caches the fully-read body and replays it on every {@code getInputStream()}/{@code getReader()}
+     * call so downstream @RequestBody deserialization sees the same bytes the HMAC was verified over.
+     */
+    private static final class CachedBodyRequestWrapper
+            extends jakarta.servlet.http.HttpServletRequestWrapper {
+        private final byte[] body;
+
+        CachedBodyRequestWrapper(HttpServletRequest request, byte[] body) {
+            super(request);
+            this.body = body;
+        }
+
+        @Override
+        public jakarta.servlet.ServletInputStream getInputStream() {
+            java.io.ByteArrayInputStream src = new java.io.ByteArrayInputStream(body);
+            return new jakarta.servlet.ServletInputStream() {
+                @Override public int read() { return src.read(); }
+                @Override public int read(byte[] b, int off, int len) { return src.read(b, off, len); }
+                @Override public boolean isFinished() { return src.available() == 0; }
+                @Override public boolean isReady() { return true; }
+                @Override public void setReadListener(jakarta.servlet.ReadListener l) {
+                    throw new UnsupportedOperationException();
+                }
+            };
+        }
+
+        @Override
+        public java.io.BufferedReader getReader() {
+            return new java.io.BufferedReader(new java.io.InputStreamReader(
+                    new java.io.ByteArrayInputStream(body),
+                    getCharacterEncoding() != null
+                            ? java.nio.charset.Charset.forName(getCharacterEncoding())
+                            : StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public int getContentLength() {
+            return body.length;
+        }
+
+        @Override
+        public long getContentLengthLong() {
+            return body.length;
+        }
     }
 }

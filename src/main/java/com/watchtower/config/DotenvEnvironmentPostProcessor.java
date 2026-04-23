@@ -10,7 +10,7 @@ import java.util.Map;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.core.env.ConfigurableEnvironment;
-import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 /**
  * Loads `.env` (KEY=VALUE, one per line) from the working directory at startup as a
@@ -19,7 +19,10 @@ import org.springframework.core.env.MapPropertySource;
  */
 public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
-    private static final String SOURCE_NAME = "dotenv-local";
+    // Name must end with "-systemEnvironment" so Spring Boot applies the
+    // env-var → dotted-name relaxed binding (enables WATCHTOWER_SECURITY_AGENTS_0_ID,
+    // etc. to map onto watchtower.security.agents[0].id).
+    private static final String SOURCE_NAME = "dotenv-local-systemEnvironment";
     private static final String FILE_NAME = ".env";
 
     @Override
@@ -36,7 +39,7 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
         }
         if (values.isEmpty()) return;
 
-        environment.getPropertySources().addLast(new MapPropertySource(SOURCE_NAME, values));
+        environment.getPropertySources().addLast(new SystemEnvironmentPropertySource(SOURCE_NAME, values));
         System.out.println("[dotenv] loaded " + values.size() + " key(s) from " + FILE_NAME);
     }
 

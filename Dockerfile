@@ -2,7 +2,8 @@ FROM eclipse-temurin:17-jdk-jammy AS build
 WORKDIR /build
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
-RUN ./gradlew --version --no-daemon || true
+# Strip CRLF so gradlew's shebang works when the build context comes from Windows.
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew && ./gradlew --version --no-daemon || true
 COPY src ./src
 RUN ./gradlew bootJar --no-daemon -x test
 
