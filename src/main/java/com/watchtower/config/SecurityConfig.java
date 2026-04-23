@@ -1,10 +1,12 @@
 package com.watchtower.config;
 
+import com.watchtower.audit.AuditLogger;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,6 +32,7 @@ public class SecurityConfig {
 
     private final MonitorProperties properties;
     private final LoginRateLimiter loginRateLimiter;
+    private final AuditLogger auditLogger;
 
     /**
      * Agent endpoint: per-agent HMAC signature authentication, stateless.
@@ -75,7 +78,30 @@ public class SecurityConfig {
         http
             .csrf(csrf -> csrf
                     .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
-            .addFilterBefore(new LoginRateLimitFilter(loginRateLimiter), BasicAuthenticationFilter.class)
+            .headers(headers -> headers
+                    .frameOptions(fo -> fo.deny())
+                    .contentTypeOptions(cto -> {})
+                    .referrerPolicy(rp -> rp.policy(
+                            org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                    .httpStrictTransportSecurity(hsts -> hsts
+                            .includeSubDomains(true)
+                            .maxAgeInSeconds(31536000))
+                    .addHeaderWriter(new org.springframework.security.web.header.writers.StaticHeadersWriter(
+                            "Permissions-Policy",
+                            "accelerometer=(), camera=(), geolocation=(), gyroscope=(), " +
+                            "magnetometer=(), microphone=(), payment=(), usb=()"))
+                    .addHeaderWriter(new org.springframework.security.web.header.writers.StaticHeadersWriter(
+                            "Content-Security-Policy",
+                            "default-src 'self'; " +
+                            "script-src 'self' https://cdn.jsdelivr.net; " +
+                            "style-src 'self' 'unsafe-inline'; " +
+                            "img-src 'self' data:; " +
+                            "font-src 'self' data:; " +
+                            "connect-src 'self' ws: wss:; " +
+                            "frame-ancestors 'none'; " +
+                            "base-uri 'self'; " +
+                            "form-action 'self'")))
+            .addFilterBefore(new LoginRateLimitFilter(loginRateLimiter, auditLogger), BasicAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
                     .requestMatchers("/css/**", "/js/**", "/favicon.ico").permitAll()
                     .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/alarms/*/ack").hasAnyRole("ADMIN", "OPERATOR")
@@ -124,9 +150,11 @@ public class SecurityConfig {
     static class LoginRateLimitFilter extends OncePerRequestFilter {
 
         private final LoginRateLimiter limiter;
+        private final AuditLogger audit;
 
-        LoginRateLimitFilter(LoginRateLimiter limiter) {
+        LoginRateLimitFilter(LoginRateLimiter limiter, AuditLogger audit) {
             this.limiter = limiter;
+            this.audit = audit;
         }
 
         @Override
@@ -135,6 +163,7 @@ public class SecurityConfig {
                                         FilterChain filterChain) throws ServletException, IOException {
             String ip = clientIp(request);
             if (limiter.isBlocked(ip)) {
+                audit.record("auth.blocked", "-", ip, Map.of("path", request.getRequestURI()));
                 response.setStatus(429);
                 response.setHeader("Retry-After", "900");
                 response.setContentType("application/json");
@@ -151,6 +180,7 @@ public class SecurityConfig {
             int status = response.getStatus();
             if (status == HttpServletResponse.SC_UNAUTHORIZED) {
                 limiter.recordFailure(ip);
+                audit.record("auth.failure", "-", ip, Map.of("path", request.getRequestURI()));
             } else if (status < 400 && request.getUserPrincipal() != null) {
                 limiter.recordSuccess(ip);
             }

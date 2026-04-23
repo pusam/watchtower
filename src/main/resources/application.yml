@@ -18,13 +18,22 @@ spring:
       mode: never
 
 watchtower:
+  audit:
+    log-path: ${WATCHTOWER_AUDIT_LOG:./data/audit.log}
   poll-interval-ms: 5000
   history-size: 60
   request-timeout-ms: 3000
   push-stale-threshold-ms: 15000
   persistence:
     enabled: true
+    # SQLite (default): used when jdbc-url is empty.
     db-path: ${WATCHTOWER_DB_PATH:./data/watchtower.db}
+    # PostgreSQL (optional): set WATCHTOWER_JDBC_URL to enable.
+    # e.g. jdbc:postgresql://db.internal:5432/watchtower
+    jdbc-url: ${WATCHTOWER_JDBC_URL:}
+    username: ${WATCHTOWER_JDBC_USER:}
+    password: ${WATCHTOWER_JDBC_PASS:}
+    pool-size: 8
     snapshot-retention-days: 7
     alarm-retention-days: 30
     restore-snapshots-per-host: 60
@@ -64,7 +73,9 @@ watchtower:
       - https://*.ngrok-free.dev
       - https://*.ngrok-free.app
       - https://*.ngrok.io
-    max-registrations-per-minute: 12
+    # Per-agent cap on /api/agent/report calls. Default poll is 5s (12/min) but
+    # the local retry queue can drain up to 20 entries per tick; allow headroom.
+    max-registrations-per-minute: 60
   hosts:
     - id: server-a
       name: Fulfillment Server A

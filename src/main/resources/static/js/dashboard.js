@@ -966,7 +966,7 @@ function renderAlarms() {
             ? `<span class="alarm-acked" title="확인: ${escapeHtml(a.acknowledgedBy || '')}">✓ ${escapeHtml(a.acknowledgedBy || '')}</span>`
             : `<button class="alarm-ack-btn" data-ack-id="${escapeHtml(a.id)}" title="확인(ack)">ack</button>`;
         return `
-        <div class="alarm-chip sev-${sev} ${ackCls}">
+        <div class="alarm-chip sev-${escapeHtml(sev)} ${ackCls}">
             <span class="alarm-sev-dot"></span>
             <span class="alarm-host">${escapeHtml(a.hostName || a.hostId || '')}</span>
             <span class="alarm-type">${escapeHtml(a.type || '')}</span>
@@ -1590,7 +1590,7 @@ function openDetailModal(req) {
     body.innerHTML = `
         ${severityBanner ? `<div class="detail-banner ${severityBanner}">${severityText}</div>` : ''}
         <div class="detail-summary">
-            <span class="method-pill method-${req.method || 'GET'}">${escapeHtml(req.method || '-')}</span>
+            <span class="method-pill method-${escapeHtml(req.method || 'GET')}">${escapeHtml(req.method || '-')}</span>
             <span class="detail-path mono">${escapeHtml(req.path || '-')}</span>
             <span class="status-badge ${statusCls}">${req.status || '-'}</span>
         </div>

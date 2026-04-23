@@ -2,6 +2,7 @@ package com.watchtower.web;
 
 import com.watchtower.alarm.AlarmEngine;
 import com.watchtower.alarm.MaintenanceService;
+import com.watchtower.audit.AuditLogger;
 import com.watchtower.analytics.EndpointStatsService;
 import com.watchtower.analytics.SlowQueryStatsService;
 import com.watchtower.domain.AlarmEvent;
@@ -14,6 +15,7 @@ import com.watchtower.logvolume.LogVolumeMonitor;
 import com.watchtower.persistence.SnapshotRepository;
 import com.watchtower.probe.SyntheticProbeService;
 import com.watchtower.store.MetricsStore;
+import jakarta.servlet.http.HttpServletRequest;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +49,7 @@ public class MetricsApiController {
     private final MaintenanceService maintenanceService;
     private final LogVolumeMonitor logVolumeMonitor;
     private final ObjectProvider<SnapshotRepository> snapshotRepoProvider;
+    private final AuditLogger auditLogger;
 
     @GetMapping("/metrics")
     public List<HostSnapshot> latestAll() {
@@ -131,29 +134,51 @@ public class MetricsApiController {
     }
 
     @PostMapping("/alarms/{id}/ack")
-    public ResponseEntity<Map<String, Object>> ackAlarm(@PathVariable String id, Principal principal) {
+    public ResponseEntity<Map<String, Object>> ackAlarm(@PathVariable String id,
+                                                        Principal principal,
+                                                        HttpServletRequest request) {
         String user = principal == null ? "unknown" : principal.getName();
         boolean ok = alarmEngine.acknowledge(id, user);
+        auditLogger.record("alarm.ack", user, clientIp(request),
+                Map.of("alarmId", id, "result", ok ? "ok" : "not_found"));
         return ok
                 ? ResponseEntity.ok(Map.of("acknowledged", true, "by", user))
                 : ResponseEntity.status(404).body(Map.of("acknowledged", false, "error", "alarm not found or already resolved"));
     }
 
     @PostMapping("/maintenance/mute")
-    public Map<String, Object> mute(@RequestBody(required = false) MuteRequest req) {
+    public Map<String, Object> mute(@RequestBody(required = false) MuteRequest req,
+                                    Principal principal,
+                                    HttpServletRequest request) {
+        String user = principal == null ? "unknown" : principal.getName();
         long dur = req == null || req.durationSec() == null ? 3600 : Math.max(60, req.durationSec());
         if (req != null && req.hostId() != null && !req.hostId().isBlank()) {
             maintenanceService.muteHostFor(req.hostId(), dur);
+            auditLogger.record("maintenance.mute.host", user, clientIp(request),
+                    Map.of("hostId", req.hostId(), "durationSec", dur));
             return Map.of("muted", true, "hostId", req.hostId(), "durationSec", dur);
         }
         maintenanceService.muteAllFor(dur);
+        auditLogger.record("maintenance.mute.all", user, clientIp(request),
+                Map.of("durationSec", dur));
         return Map.of("muted", true, "scope", "all", "durationSec", dur);
     }
 
     @PostMapping("/maintenance/unmute")
-    public Map<String, Object> unmute() {
+    public Map<String, Object> unmute(Principal principal, HttpServletRequest request) {
+        String user = principal == null ? "unknown" : principal.getName();
         maintenanceService.unmuteAll();
+        auditLogger.record("maintenance.unmute", user, clientIp(request), Map.of());
         return Map.of("muted", false);
+    }
+
+    private static String clientIp(HttpServletRequest request) {
+        String fwd = request.getHeader("X-Forwarded-For");
+        if (fwd != null && !fwd.isBlank()) {
+            int comma = fwd.indexOf(',');
+            return (comma < 0 ? fwd : fwd.substring(0, comma)).trim();
+        }
+        return request.getRemoteAddr();
     }
 
     public record MuteRequest(String hostId, Long durationSec) {}

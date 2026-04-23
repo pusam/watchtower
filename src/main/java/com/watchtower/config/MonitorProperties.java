@@ -37,7 +37,7 @@ public class MonitorProperties {
         private String dashboardPassword = "";
         private String agentApiKey = "";
         private List<String> allowedOrigins = List.of("http://localhost:9090");
-        private int maxRegistrationsPerMinute = 12;
+        private int maxRegistrationsPerMinute = 60;
         private List<DashboardUser> users = new ArrayList<>();
         private List<AgentCredential> agents = new ArrayList<>();
         private long agentMaxClockSkewSeconds = 300;
@@ -93,6 +93,11 @@ public class MonitorProperties {
         private int alarmRetentionDays = 30;
         private long writeIntervalMs = 0;
         private int restoreSnapshotsPerHost = 60;
+        // If set, overrides db-path and connects to the given JDBC URL (e.g. PostgreSQL).
+        private String jdbcUrl = "";
+        private String username = "";
+        private String password = "";
+        private int poolSize = 8;
     }
 
     @Data

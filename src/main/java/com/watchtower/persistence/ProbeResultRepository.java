@@ -12,17 +12,25 @@ import org.springframework.stereotype.Repository;
 public class ProbeResultRepository {
 
     private final JdbcTemplate jdbc;
+    private final DbDialect dialect;
 
-    public ProbeResultRepository(JdbcTemplate jdbc) {
+    public ProbeResultRepository(JdbcTemplate jdbc, DbDialect dialect) {
         this.jdbc = jdbc;
+        this.dialect = dialect;
     }
 
     public void save(ProbeResult r) {
         try {
             long ts = r.checkedAt() == null ? System.currentTimeMillis() : r.checkedAt().toEpochMilli();
-            jdbc.update(
-                    "INSERT OR REPLACE INTO probe_result(probe_id, ts, status, latency_ms, http_code, message) " +
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+            String sql = dialect == DbDialect.POSTGRES
+                    ? "INSERT INTO probe_result(probe_id, ts, status, latency_ms, http_code, message) " +
+                      "VALUES (?, ?, ?, ?, ?, ?) " +
+                      "ON CONFLICT (probe_id, ts) DO UPDATE SET " +
+                      "  status = EXCLUDED.status, latency_ms = EXCLUDED.latency_ms, " +
+                      "  http_code = EXCLUDED.http_code, message = EXCLUDED.message"
+                    : "INSERT OR REPLACE INTO probe_result(probe_id, ts, status, latency_ms, http_code, message) " +
+                      "VALUES (?, ?, ?, ?, ?, ?)";
+            jdbc.update(sql,
                     r.probeId(), ts, r.status().name(), r.elapsedMs(), r.statusCode(), r.error());
         } catch (Exception e) {
             log.warn("probe_result persist failed id={}", r.probeId(), e);

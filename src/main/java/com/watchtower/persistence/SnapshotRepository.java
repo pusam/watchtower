@@ -15,19 +15,23 @@ public class SnapshotRepository {
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
+    private final DbDialect dialect;
 
-    public SnapshotRepository(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+    public SnapshotRepository(JdbcTemplate jdbc, ObjectMapper objectMapper, DbDialect dialect) {
         this.jdbc = jdbc;
         this.mapper = objectMapper;
+        this.dialect = dialect;
     }
 
     public void save(HostSnapshot snap) {
         if (snap.hostId() == null || snap.timestamp() == null) return;
         try {
             String json = mapper.writeValueAsString(snap);
-            jdbc.update(
-                    "INSERT OR REPLACE INTO host_snapshot(host_id, ts, payload) VALUES (?, ?, ?)",
-                    snap.hostId(), snap.timestamp().toEpochMilli(), json);
+            String sql = dialect == DbDialect.POSTGRES
+                    ? "INSERT INTO host_snapshot(host_id, ts, payload) VALUES (?, ?, ?) " +
+                      "ON CONFLICT (host_id, ts) DO UPDATE SET payload = EXCLUDED.payload"
+                    : "INSERT OR REPLACE INTO host_snapshot(host_id, ts, payload) VALUES (?, ?, ?)";
+            jdbc.update(sql, snap.hostId(), snap.timestamp().toEpochMilli(), json);
         } catch (JsonProcessingException e) {
             log.warn("snapshot serialize failed host={}", snap.hostId(), e);
         } catch (Exception e) {
