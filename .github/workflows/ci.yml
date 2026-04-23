@@ -33,8 +33,8 @@ jobs:
       - name: Normalize gradlew line endings
         run: sed -i 's/\r$//' gradlew && chmod +x gradlew
 
-      - name: Run tests
-        run: ./gradlew test --no-daemon
+      - name: Run tests + coverage
+        run: ./gradlew test jacocoTestReport --no-daemon
 
       - name: Build bootJar
         run: ./gradlew bootJar --no-daemon -x test
@@ -47,6 +47,13 @@ jobs:
           path: |
             build/reports/tests/test/
             build/test-results/test/
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: build/reports/jacoco/test/
 
   docker:
     name: Docker image build
