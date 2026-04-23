@@ -1,0 +1,24 @@
+Watchtower has been installed.
+
+Dashboard: port-forward to access locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "watchtower.fullname" . }} 9090:{{ .Values.service.port }}
+  open http://localhost:9090
+
+{{- if .Values.ingress.enabled }}
+
+Ingress is enabled. Hosts:
+{{- range .Values.ingress.hosts }}
+  - http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- end }}
+
+Credentials:
+  Default username: admin
+  Password: set WATCHTOWER_DASHBOARD_PASS via secretEnv or override before upgrade.
+
+Next steps:
+  1. Configure agents to POST to:
+       http://{{ include "watchtower.fullname" . }}.{{ .Release.Namespace }}:{{ .Values.service.port }}/api/agent/report
+     with HMAC signature headers (X-Agent-Id, X-Timestamp, X-Signature).
+  2. If using Prometheus Operator, set serviceMonitor.enabled=true and provide a scrape token.
+  3. For HA, point WATCHTOWER_JDBC_URL at a PostgreSQL instance and set replicaCount > 1.

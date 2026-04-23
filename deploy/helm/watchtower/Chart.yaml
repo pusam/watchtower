@@ -1,0 +1,12 @@
+apiVersion: v2
+name: watchtower
+description: Watchtower - lightweight server monitoring dashboard with alarms, Prometheus metrics, and HMAC-authenticated agent ingestion.
+type: application
+version: 0.1.0
+appVersion: "0.0.1"
+kubeVersion: ">=1.24.0-0"
+maintainers:
+  - name: Watchtower
+home: https://github.com/pusam/watchtower
+sources:
+  - https://github.com/pusam/watchtower
