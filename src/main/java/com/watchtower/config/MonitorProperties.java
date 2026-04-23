@@ -118,6 +118,13 @@ public class MonitorProperties {
         private String slackWebhookUrl = "";
         private String discordWebhookUrl = "";
         private String genericWebhookUrl = "";
+        private String teamsWebhookUrl = "";
+        /** PagerDuty Events API v2 integration ("routing key"). */
+        private String pagerdutyRoutingKey = "";
+        /** Opsgenie REST API key. */
+        private String opsgenieApiKey = "";
+        /** Defaults to US region; set {@code https://api.eu.opsgenie.com} for EU tenants. */
+        private String opsgenieApiBaseUrl = "https://api.opsgenie.com";
         private double cpuThresholdPct = 90;
         private double memThresholdPct = 90;
         private double diskThresholdPct = 85;
