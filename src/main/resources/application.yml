@@ -68,6 +68,9 @@ watchtower:
     agent-api-key: ${WATCHTOWER_AGENT_API_KEY:}
     allow-legacy-api-key: ${WATCHTOWER_ALLOW_LEGACY_API_KEY:true}
     agent-max-clock-skew-seconds: 300
+    # Bearer token for /actuator/prometheus scrape. Empty = endpoint blocked.
+    # Generate: openssl rand -hex 32
+    prometheus-scrape-token: ${WATCHTOWER_PROMETHEUS_SCRAPE_TOKEN:}
     allowed-origins:
       - ${WATCHTOWER_ALLOWED_ORIGIN:http://localhost:9090}
       - https://*.ngrok-free.dev
@@ -113,11 +116,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       show-details: never
       probes:
+        enabled: true
+  prometheus:
+    metrics:
+      export:
         enabled: true
 
 logging:

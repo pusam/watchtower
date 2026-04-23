@@ -70,10 +70,28 @@ public class SecurityConfig {
     }
 
     /**
-     * Dashboard & API: HTTP Basic authentication.
+     * Prometheus scrape endpoint: Bearer-token auth (Grafana Agent / Prometheus scrape convention).
+     * When {@code prometheus-scrape-token} is empty, returns 403 for every request.
      */
     @Bean
     @Order(3)
+    public SecurityFilterChain prometheusFilterChain(HttpSecurity http) throws Exception {
+        String token = properties.getSecurity().getPrometheusScrapeToken();
+        http
+            .securityMatcher("/actuator/prometheus")
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .addFilterBefore(new PrometheusScrapeTokenFilter(token),
+                    UsernamePasswordAuthenticationFilter.class)
+            .authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
+        return http.build();
+    }
+
+    /**
+     * Dashboard & API: HTTP Basic authentication.
+     */
+    @Bean
+    @Order(4)
     public SecurityFilterChain dashboardFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf

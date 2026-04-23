@@ -42,6 +42,11 @@ public class MonitorProperties {
         private List<AgentCredential> agents = new ArrayList<>();
         private long agentMaxClockSkewSeconds = 300;
         private boolean allowLegacyApiKey = true;
+        /**
+         * Bearer token required on {@code /actuator/prometheus}. Empty = endpoint is disabled
+         * (returns 403). Generate with {@code openssl rand -hex 32}.
+         */
+        private String prometheusScrapeToken = "";
     }
 
     @Data
