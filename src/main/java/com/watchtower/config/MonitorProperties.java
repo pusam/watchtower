@@ -47,6 +47,30 @@ public class MonitorProperties {
          * (returns 403). Generate with {@code openssl rand -hex 32}.
          */
         private String prometheusScrapeToken = "";
+        private Oidc oidc = new Oidc();
+    }
+
+    /**
+     * Optional OIDC single-sign-on. When {@link #enabled} is true, browsers are redirected
+     * to the configured IdP; HTTP Basic remains available for API/script clients.
+     * Role mapping: values from the configured claim (default {@code groups}) are looked up
+     * in {@link #roleMapping}; unmapped users get {@link #defaultRole}.
+     */
+    @Data
+    public static class Oidc {
+        private boolean enabled = false;
+        private String issuerUri = "";
+        private String clientId = "";
+        private String clientSecret = "";
+        private List<String> scope = List.of("openid", "profile", "email");
+        /** Claim used as the principal's display name (falls back to {@code sub}). */
+        private String usernameClaim = "email";
+        /** Claim that carries the user's groups/roles (array or space-delimited string). */
+        private String roleClaim = "groups";
+        /** External-group → Watchtower-role map, e.g. {@code "ops-admins: ADMIN"}. */
+        private Map<String, String> roleMapping = new HashMap<>();
+        /** Role assigned when no mapping matches. Use an empty string to deny access. */
+        private String defaultRole = "VIEWER";
     }
 
     @Data

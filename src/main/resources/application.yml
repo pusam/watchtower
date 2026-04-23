@@ -83,6 +83,22 @@ watchtower:
     # Per-agent cap on /api/agent/report calls. Default poll is 5s (12/min) but
     # the local retry queue can drain up to 20 entries per tick; allow headroom.
     max-registrations-per-minute: 60
+    # Optional OIDC / SSO (alongside HTTP Basic). Set enabled=true plus issuer/client
+    # details to redirect browser users to the IdP. Basic-auth API clients keep working.
+    # Redirect URI to register with the IdP: <base-url>/login/oauth2/code/watchtower
+    oidc:
+      enabled: ${WATCHTOWER_OIDC_ENABLED:false}
+      issuer-uri: ${WATCHTOWER_OIDC_ISSUER:}
+      client-id: ${WATCHTOWER_OIDC_CLIENT_ID:}
+      client-secret: ${WATCHTOWER_OIDC_CLIENT_SECRET:}
+      # Claim carrying the user's groups/roles (array or space-delimited string).
+      role-claim: ${WATCHTOWER_OIDC_ROLE_CLAIM:groups}
+      username-claim: ${WATCHTOWER_OIDC_USERNAME_CLAIM:email}
+      default-role: ${WATCHTOWER_OIDC_DEFAULT_ROLE:VIEWER}
+      # External-group → Watchtower role. Example via env:
+      #   WATCHTOWER_SECURITY_OIDC_ROLE_MAPPING_ops-admins=ADMIN
+      #   WATCHTOWER_SECURITY_OIDC_ROLE_MAPPING_ops-oncall=OPERATOR
+      role-mapping: {}
   hosts:
     - id: server-a
       name: Fulfillment Server A

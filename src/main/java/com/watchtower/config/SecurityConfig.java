@@ -19,6 +19,13 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.registration.ClientRegistrations;
+import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
@@ -88,11 +95,15 @@ public class SecurityConfig {
     }
 
     /**
-     * Dashboard & API: HTTP Basic authentication.
+     * Dashboard & API: HTTP Basic authentication, plus optional OIDC single sign-on.
+     * When OIDC is enabled, unauthenticated browser requests redirect to the IdP; API
+     * clients that send {@code Authorization: Basic ...} continue to work unchanged.
      */
     @Bean
     @Order(4)
-    public SecurityFilterChain dashboardFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain dashboardFilterChain(
+            HttpSecurity http,
+            ObjectProvider<ClientRegistrationRepository> clientRegistrationRepository) throws Exception {
         http
             .csrf(csrf -> csrf
                     .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
@@ -129,7 +140,39 @@ public class SecurityConfig {
                     .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/**").hasRole("ADMIN")
                     .anyRequest().authenticated())
             .httpBasic(basic -> {});
+
+        MonitorProperties.Oidc oidc = properties.getSecurity().getOidc();
+        if (oidc.isEnabled() && clientRegistrationRepository.getIfAvailable() != null) {
+            WatchtowerOidcUserService oidcUsers = new WatchtowerOidcUserService(oidc);
+            http.oauth2Login(o -> o.userInfoEndpoint(u -> u.oidcUserService(oidcUsers)));
+        }
         return http.build();
+    }
+
+    /**
+     * Only registers a ClientRegistrationRepository when OIDC is enabled and an issuer
+     * URI is configured; keeps Spring's OAuth2 auto-config dormant otherwise.
+     */
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            name = "watchtower.security.oidc.enabled", havingValue = "true")
+    public ClientRegistrationRepository watchtowerClientRegistrationRepository() {
+        MonitorProperties.Oidc oidc = properties.getSecurity().getOidc();
+        if (oidc.getIssuerUri() == null || oidc.getIssuerUri().isBlank()) {
+            throw new IllegalStateException(
+                    "watchtower.security.oidc.enabled=true but issuer-uri is empty");
+        }
+        ClientRegistration registration = ClientRegistrations
+                .fromIssuerLocation(oidc.getIssuerUri())
+                .registrationId("watchtower")
+                .clientId(oidc.getClientId())
+                .clientSecret(oidc.getClientSecret())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("{baseUrl}/login/oauth2/code/watchtower")
+                .scope(oidc.getScope())
+                .build();
+        return new InMemoryClientRegistrationRepository(registration);
     }
 
     @Bean
