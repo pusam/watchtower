@@ -1,5 +1,8 @@
 server:
   port: 9090
+  tomcat:
+    max-swallow-size: 4MB
+  max-http-request-header-size: 16KB
 
 spring:
   application:
@@ -62,6 +65,10 @@ watchtower:
     agents: []
       # - id: server-a
       #   hmac-secret: ${AGENT_SECRET_SERVER_A:}
+      #   # Rotation: when issuing a new secret, put the old one here until the
+      #   # agent has migrated. Remove afterwards.
+      #   previous-hmac-secrets:
+      #     - ${AGENT_SECRET_SERVER_A_PREV:}
       # - id: server-b
       #   hmac-secret: ${AGENT_SECRET_SERVER_B:}
     # Legacy single-key fallback. Disable in production after migrating all agents.

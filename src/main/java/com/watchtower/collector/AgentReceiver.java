@@ -143,7 +143,7 @@ public class AgentReceiver {
                         str(s, "database"),
                         str(s, "user"),
                         str(s, "clientHost"),
-                        str(s, "sql"),
+                        SqlRedactor.redact(str(s, "sql")),
                         str(s, "source")))
                 .toList();
 
@@ -159,10 +159,10 @@ public class AgentReceiver {
             @Size(max = 128) String displayName,
             @Size(max = 256) String agentUrl,
             Map<String, Object> host,
-            List<Map<String, Object>> apps,
-            List<Map<String, Object>> requests,
-            List<Map<String, Object>> certs,
-            List<Map<String, Object>> slowQueries
+            @Size(max = 200) List<Map<String, Object>> apps,
+            @Size(max = 2000) List<Map<String, Object>> requests,
+            @Size(max = 200) List<Map<String, Object>> certs,
+            @Size(max = 500) List<Map<String, Object>> slowQueries
     ) {}
 
     private static String str(Map<String, Object> m, String k) {

@@ -132,6 +132,49 @@ class AgentSignatureFilterTest {
     }
 
     @Test
+    void accepts_previousSecret_duringRotation() throws Exception {
+        String newSecret = "aaaa1111aaaa1111aaaa1111aaaa1111";
+        String oldSecret = "bbbb2222bbbb2222bbbb2222bbbb2222";
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        long ts = System.currentTimeMillis() / 1000L;
+        String sig = sign(oldSecret, "server-a", Long.toString(ts), body);
+
+        MockHttpServletRequest req = req("server-a", Long.toString(ts), sig, null, body);
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        MonitorProperties.AgentCredential c = new MonitorProperties.AgentCredential();
+        c.setId("server-a");
+        c.setHmacSecret(newSecret);
+        c.setPreviousHmacSecrets(List.of(oldSecret));
+        new AgentSignatureFilter(List.of(c), null, false, 300).doFilter(req, resp, chain);
+
+        verify(chain).doFilter(any(), any());
+        assertThat(resp.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void rejects_afterPreviousSecretRemoved() throws Exception {
+        String newSecret = "aaaa1111aaaa1111aaaa1111aaaa1111";
+        String oldSecret = "bbbb2222bbbb2222bbbb2222bbbb2222";
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        long ts = System.currentTimeMillis() / 1000L;
+        String sig = sign(oldSecret, "server-a", Long.toString(ts), body);
+
+        MockHttpServletRequest req = req("server-a", Long.toString(ts), sig, null, body);
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        MonitorProperties.AgentCredential c = new MonitorProperties.AgentCredential();
+        c.setId("server-a");
+        c.setHmacSecret(newSecret);
+        new AgentSignatureFilter(List.of(c), null, false, 300).doFilter(req, resp, chain);
+
+        verify(chain, never()).doFilter(any(), any());
+        assertThat(resp.getStatus()).isEqualTo(401);
+    }
+
+    @Test
     void canonical_format_isAgentNewlineTsNewlineBody() {
         byte[] out = AgentSignatureFilter.canonical(
                 "agent-x", "1234567890",

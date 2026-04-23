@@ -35,8 +35,9 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
     public static final String SIGNATURE_HEADER = "X-Signature";
     public static final String LEGACY_API_KEY_HEADER = "X-API-Key";
     public static final String AUTHENTICATED_AGENT_ATTR = "watchtower.authenticatedAgentId";
+    static final int MAX_BODY_BYTES = 4 * 1024 * 1024; // 4MB
 
-    private final Map<String, byte[]> agentSecrets;
+    private final Map<String, List<byte[]>> agentSecrets;
     private final byte[] legacyKeyBytes;
     private final boolean allowLegacyKey;
     private final long maxSkewSeconds;
@@ -45,11 +46,22 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
                                 String legacyApiKey,
                                 boolean allowLegacyApiKey,
                                 long maxSkewSeconds) {
-        Map<String, byte[]> m = new ConcurrentHashMap<>();
+        Map<String, List<byte[]>> m = new ConcurrentHashMap<>();
         if (agents != null) {
             for (MonitorProperties.AgentCredential a : agents) {
-                if (a.getId() == null || a.getHmacSecret() == null) continue;
-                m.put(a.getId(), a.getHmacSecret().getBytes(StandardCharsets.UTF_8));
+                if (a.getId() == null) continue;
+                java.util.ArrayList<byte[]> secrets = new java.util.ArrayList<>(2);
+                if (a.getHmacSecret() != null && !a.getHmacSecret().isBlank()) {
+                    secrets.add(a.getHmacSecret().getBytes(StandardCharsets.UTF_8));
+                }
+                if (a.getPreviousHmacSecrets() != null) {
+                    for (String prev : a.getPreviousHmacSecrets()) {
+                        if (prev != null && !prev.isBlank()) {
+                            secrets.add(prev.getBytes(StandardCharsets.UTF_8));
+                        }
+                    }
+                }
+                if (!secrets.isEmpty()) m.put(a.getId(), secrets);
             }
         }
         this.agentSecrets = m;
@@ -63,10 +75,21 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        long declared = request.getContentLengthLong();
+        if (declared > MAX_BODY_BYTES) {
+            response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+            response.setContentType("application/json");
+            response.getWriter().write("{\"error\":\"payload too large\"}");
+            return;
+        }
         ContentCachingRequestWrapper wrapped = new ContentCachingRequestWrapper(request);
-        // Force body read into cache before we verify, so controller gets a fresh stream.
-        wrapped.getInputStream().readAllBytes();
-        byte[] body = wrapped.getContentAsByteArray();
+        byte[] body = readBoundedBody(wrapped);
+        if (body == null) {
+            response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+            response.setContentType("application/json");
+            response.getWriter().write("{\"error\":\"payload too large\"}");
+            return;
+        }
 
         String agentId = request.getHeader(AGENT_ID_HEADER);
         String timestamp = request.getHeader(TIMESTAMP_HEADER);
@@ -99,8 +122,8 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
     }
 
     private String verifySignature(String agentId, String timestamp, String signatureHex, byte[] body) {
-        byte[] secret = agentSecrets.get(agentId);
-        if (secret == null) return null;
+        List<byte[]> secrets = agentSecrets.get(agentId);
+        if (secrets == null || secrets.isEmpty()) return null;
 
         long ts;
         try {
@@ -111,14 +134,18 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
         long now = System.currentTimeMillis() / 1000L;
         if (Math.abs(now - ts) > maxSkewSeconds) return null;
 
-        byte[] expected = hmacSha256(secret, canonical(agentId, timestamp, body));
         byte[] provided;
         try {
             provided = HexFormat.of().parseHex(signatureHex.toLowerCase());
         } catch (IllegalArgumentException e) {
             return null;
         }
-        return MessageDigest.isEqual(expected, provided) ? agentId : null;
+        byte[] canonical = canonical(agentId, timestamp, body);
+        for (byte[] secret : secrets) {
+            byte[] expected = hmacSha256(secret, canonical);
+            if (MessageDigest.isEqual(expected, provided)) return agentId;
+        }
+        return null;
     }
 
     static byte[] canonical(String agentId, String timestamp, byte[] body) {
@@ -157,5 +184,18 @@ public class AgentSignatureFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
         response.getWriter().write("{\"error\":\"" + msg + "\"}");
+    }
+
+    private static byte[] readBoundedBody(ContentCachingRequestWrapper wrapped) throws IOException {
+        java.io.InputStream in = wrapped.getInputStream();
+        byte[] buf = new byte[8192];
+        int total = 0;
+        while (true) {
+            int n = in.read(buf);
+            if (n < 0) break;
+            total += n;
+            if (total > MAX_BODY_BYTES) return null;
+        }
+        return wrapped.getContentAsByteArray();
     }
 }

@@ -48,6 +48,9 @@ public class MonitorProperties {
     public static class AgentCredential {
         private String id;
         private String hmacSecret;
+        // Additional secrets accepted during rotation (previous keys).
+        // Remove entries after agents have migrated to the new primary secret.
+        private List<String> previousHmacSecrets = new ArrayList<>();
     }
 
     @Data

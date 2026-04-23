@@ -41,6 +41,16 @@ public class SecurityConfigValidator {
                             "watchtower.security.agents[" + i + "].hmac-secret must be >= 32 chars " +
                             "(generate: openssl rand -hex 32)");
                 }
+                if (a.getPreviousHmacSecrets() != null) {
+                    for (int j = 0; j < a.getPreviousHmacSecrets().size(); j++) {
+                        String prev = a.getPreviousHmacSecrets().get(j);
+                        if (prev == null || prev.length() < 32) {
+                            throw new IllegalStateException(
+                                    "watchtower.security.agents[" + i + "].previous-hmac-secrets["
+                                    + j + "] must be >= 32 chars");
+                        }
+                    }
+                }
             }
         }
         if (hasLegacyKey && sec.isAllowLegacyApiKey() && sec.getAgentApiKey().length() < 16) {
