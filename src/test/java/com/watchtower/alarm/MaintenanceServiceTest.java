@@ -40,6 +40,25 @@ class MaintenanceServiceTest {
     }
 
     @Test
+    void muteHostFor_afterMuteAllFor_keepsAllHostsMuted() {
+        MaintenanceService m = newService(new MonitorProperties());
+        m.muteAllFor(60);
+        m.muteHostFor("srv-a", 30);
+        assertThat(m.isMuted("srv-a")).isTrue();
+        assertThat(m.isMuted("srv-b")).isTrue();
+    }
+
+    @Test
+    void unmuteAll_clearsBothAllScopeAndPerHostMutes() {
+        MaintenanceService m = newService(new MonitorProperties());
+        m.muteAllFor(60);
+        m.muteHostFor("srv-a", 30);
+        m.unmuteAll();
+        assertThat(m.isMuted("srv-a")).isFalse();
+        assertThat(m.isMuted("srv-b")).isFalse();
+    }
+
+    @Test
     void maintenanceWindowWithoutHostIds_mutesAll() {
         MonitorProperties props = new MonitorProperties();
         MonitorProperties.MaintenanceWindow w = new MonitorProperties.MaintenanceWindow();

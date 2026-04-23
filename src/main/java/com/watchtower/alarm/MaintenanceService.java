@@ -4,7 +4,7 @@ import com.watchtower.config.MonitorProperties;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -14,22 +14,23 @@ import org.springframework.stereotype.Component;
 public class MaintenanceService {
 
     private final MonitorProperties properties;
-    private final Set<String> runtimeMutedHosts = ConcurrentHashMap.newKeySet();
-    private volatile long runtimeMuteUntil = 0L;
+    // Epoch ms: every host is muted until this instant. Independent from per-host mutes
+    // so that adding a host-scoped mute on top of "mute all" does not narrow the scope.
+    private volatile long allMuteUntil = 0L;
+    private final Map<String, Long> hostMuteUntil = new ConcurrentHashMap<>();
 
     public MaintenanceService(MonitorProperties properties) {
         this.properties = properties;
     }
 
     public boolean isMuted(String hostId) {
-        if (runtimeMuteUntil > System.currentTimeMillis()) {
-            if (runtimeMutedHosts.isEmpty() || runtimeMutedHosts.contains(hostId)) {
-                return true;
-            }
-        }
-        Instant now = Instant.now();
+        long now = System.currentTimeMillis();
+        if (allMuteUntil > now) return true;
+        Long until = hostMuteUntil.get(hostId);
+        if (until != null && until > now) return true;
+        Instant nowInstant = Instant.now();
         for (MonitorProperties.MaintenanceWindow w : properties.getMaintenance()) {
-            if (!inWindow(w, now)) continue;
+            if (!inWindow(w, nowInstant)) continue;
             if (w.getHostIds() == null || w.getHostIds().isEmpty()) return true;
             if (w.getHostIds().contains(hostId)) return true;
         }
@@ -37,20 +38,20 @@ public class MaintenanceService {
     }
 
     public void muteAllFor(long durationSec) {
-        runtimeMutedHosts.clear();
-        runtimeMuteUntil = System.currentTimeMillis() + durationSec * 1000L;
+        long target = System.currentTimeMillis() + durationSec * 1000L;
+        allMuteUntil = Math.max(allMuteUntil, target);
         log.info("muted all hosts for {}s", durationSec);
     }
 
     public void muteHostFor(String hostId, long durationSec) {
-        runtimeMutedHosts.add(hostId);
-        runtimeMuteUntil = Math.max(runtimeMuteUntil, System.currentTimeMillis() + durationSec * 1000L);
+        long target = System.currentTimeMillis() + durationSec * 1000L;
+        hostMuteUntil.merge(hostId, target, Math::max);
         log.info("muted host {} for {}s", hostId, durationSec);
     }
 
     public void unmuteAll() {
-        runtimeMutedHosts.clear();
-        runtimeMuteUntil = 0L;
+        allMuteUntil = 0L;
+        hostMuteUntil.clear();
     }
 
     private boolean inWindow(MonitorProperties.MaintenanceWindow w, Instant now) {
